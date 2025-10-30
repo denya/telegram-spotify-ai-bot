@@ -22,7 +22,7 @@ endif
 python-info:
 	@printf "Python command: %s\n" "$(PYTHON)"
 	@if $(PYTHON) -c 'import sys' >/dev/null 2>&1; then \
-		$(PYTHON) -c 'import sys; print(\"Python version:\", sys.version.split()[0]); print(\"Executable:\", sys.executable)'; \
+		$(PYTHON) -c 'import sys; print("Python version:", sys.version.split()[0]); print("Executable:", sys.executable)'; \
 	else \
 		printf "Unable to execute Python via '%s'. Try 'make pyenv-bootstrap'.\n" "$(PYTHON)"; \
 	fi
