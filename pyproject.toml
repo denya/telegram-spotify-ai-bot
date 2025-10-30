@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "telegram-spotify-ai-bot"
+version = "0.1.0"
+description = "Telegram bot integrating Spotify playback and Claude-powered playlists"
+requires-python = ">=3.14"
+dependencies = []
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+select = [
+    "E",
+    "F",
+    "I",
+    "UP",
+    "ASYNC",
+    "N",
+    "Q",
+    "S",
+    "B",
+    "RUF"
+]
+ignore = ["D100", "D101", "D102", "D103", "D104", "D105", "D107"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+warn_unused_configs = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_return_any = true
+warn_unreachable = true
+no_implicit_optional = true
+show_error_codes = true
+pretty = true
+ignore_missing_imports = true
+plugins = []
+
+[tool.pytest.ini_options]
+minversion = "7.0"
+testpaths = ["tests"]
+addopts = "-ra"
