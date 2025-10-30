@@ -10,7 +10,7 @@ Lean Telegram bot that connects personal Spotify accounts, exposes playback cont
 - Claude + web search assisted playlist creation (Phase 2)
 
 ### Tech Stack
-- Python 3.14
+- Python 3.13
 - aiogram 3 (Telegram bot)
 - FastAPI + Uvicorn (auth callback service)
 - SQLite (minimal persistence)
@@ -18,7 +18,7 @@ Lean Telegram bot that connects personal Spotify accounts, exposes playback cont
 - Anthropic Claude with web search
 
 ### Local Setup
-1. Create a virtual environment using Python 3.14.
+1. Create a virtual environment using Python 3.13.
 2. Copy `.env.example` to `.env` and fill in the tokens and secrets.
 3. Install dependencies with `pip install -r requirements.txt` (file to be added in later tasks).
 4. Run the bot entry point (TBD) after completing the Spotify authorization steps.

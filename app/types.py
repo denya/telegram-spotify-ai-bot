@@ -1,4 +1,10 @@
-"""Placeholder module for upcoming implementation."""
+"""Shared typing primitives for the Telegram Spotify AI Bot."""
+
+from __future__ import annotations
+
+from typing import Literal
 
 
-__all__ = []
+TelegramMode = Literal["polling", "webhook"]
+
+__all__ = ["TelegramMode"]
