@@ -25,6 +25,105 @@ logger = logging.getLogger(__name__)
 router = Router(name="playlists")
 
 
+async def _fetch_user_preferences(spotify, user_id: int) -> str:
+    """Fetch and format user's Spotify preferences for the AI prompt."""
+    logger.info("Fetching user preferences for user %s", user_id)
+    
+    preferences_parts = []
+    
+    try:
+        # Fetch multiple time ranges in parallel for a comprehensive view
+        top_artists_medium, top_artists_long, top_tracks_recent, recently_played = (
+            await asyncio.gather(
+                spotify.get_top_artists(user_id, time_range="medium_term", limit=15),
+                spotify.get_top_artists(user_id, time_range="long_term", limit=10),
+                spotify.get_top_tracks(user_id, time_range="short_term", limit=10),
+                spotify.get_recently_played(user_id, limit=20),
+                return_exceptions=True,
+            )
+        )
+        
+        # Process top artists (medium term - last 6 months)
+        if not isinstance(top_artists_medium, Exception) and top_artists_medium:
+            artist_names = []
+            genres = set()
+            for artist in top_artists_medium[:15]:
+                if isinstance(artist, dict):
+                    name = artist.get("name")
+                    if name:
+                        artist_names.append(name)
+                    artist_genres = artist.get("genres", [])
+                    if isinstance(artist_genres, list):
+                        genres.update(artist_genres[:3])  # Top 3 genres per artist
+            
+            if artist_names:
+                preferences_parts.append(
+                    f"Favorite Artists (last 6 months): {', '.join(artist_names[:10])}"
+                )
+            if genres:
+                # Limit to most relevant genres
+                genre_list = sorted(list(genres))[:12]
+                preferences_parts.append(f"Preferred Genres: {', '.join(genre_list)}")
+        
+        # Process long-term favorites for deeper understanding
+        if not isinstance(top_artists_long, Exception) and top_artists_long:
+            long_term_artists = []
+            for artist in top_artists_long[:5]:
+                if isinstance(artist, dict):
+                    name = artist.get("name")
+                    if name:
+                        long_term_artists.append(name)
+            if long_term_artists:
+                preferences_parts.append(
+                    f"All-Time Favorites: {', '.join(long_term_artists)}"
+                )
+        
+        # Process recent top tracks
+        if not isinstance(top_tracks_recent, Exception) and top_tracks_recent:
+            recent_tracks = []
+            for track in top_tracks_recent[:8]:
+                if isinstance(track, dict):
+                    track_name = track.get("name")
+                    artists = track.get("artists", [])
+                    if track_name and isinstance(artists, list) and artists:
+                        artist_name = artists[0].get("name") if isinstance(artists[0], dict) else None
+                        if artist_name:
+                            recent_tracks.append(f"{artist_name} - {track_name}")
+            if recent_tracks:
+                preferences_parts.append(
+                    f"Recently Loved Tracks:\n  " + "\n  ".join(recent_tracks[:6])
+                )
+        
+        # Process recently played to understand current listening patterns
+        if not isinstance(recently_played, Exception) and recently_played:
+            recent_artists = []
+            for item in recently_played[:15]:
+                if isinstance(item, dict):
+                    track = item.get("track", {})
+                    if isinstance(track, dict):
+                        artists = track.get("artists", [])
+                        if isinstance(artists, list) and artists:
+                            artist_name = artists[0].get("name") if isinstance(artists[0], dict) else None
+                            if artist_name and artist_name not in recent_artists:
+                                recent_artists.append(artist_name)
+            if recent_artists:
+                preferences_parts.append(
+                    f"Recently Played Artists: {', '.join(recent_artists[:8])}"
+                )
+        
+        if preferences_parts:
+            result = "\n".join(preferences_parts)
+            logger.info("Successfully built user preferences context (%d chars)", len(result))
+            return result
+        else:
+            logger.warning("No preference data could be extracted for user %s", user_id)
+            return ""
+            
+    except Exception as exc:
+        logger.warning("Failed to fetch user preferences: %s", exc, exc_info=True)
+        return ""
+
+
 def _playlist_name(context: str) -> str:
     trimmed = context.strip()
     base = trimmed[:64].strip() or "Custom Mix"
@@ -277,16 +376,28 @@ async def handle_mix_command(message: Message) -> None:
     try:
         status = await message.answer("Cooking up a playlist…")
 
+        spotify = _get_spotify_client(message)
+        
+        # Fetch user preferences to personalize the playlist
+        logger.info("Fetching user preferences for personalization")
+        try:
+            user_preferences = await _fetch_user_preferences(spotify, user_id)
+            if user_preferences:
+                logger.info("User preferences fetched successfully, %d chars", len(user_preferences))
+            else:
+                logger.info("No user preferences available, will use request only")
+        except Exception as exc:
+            logger.warning("Failed to fetch user preferences, continuing without: %s", exc)
+            user_preferences = ""
+
         planner = ClaudePlaylistPlanner(api_key=settings.anthropic_api_key)
         try:
-            plan = await planner.plan(context=context)
+            plan = await planner.plan(context=context, user_preferences=user_preferences)
             logger.info("Successfully generated playlist plan with %d tracks", len(plan.tracks))
         except PlaylistPlannerError as exc:
             logger.error("Playlist planning failed for user %s: %s", user_id, exc, exc_info=True)
             await status.edit_text(f"Claude couldn't build a playlist: {exc}")
             return
-
-        spotify = _get_spotify_client(message)
 
         logger.info("Starting parallel Spotify search for %d tracks", len(plan.tracks))
         try:

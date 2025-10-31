@@ -14,24 +14,50 @@ logger = logging.getLogger(__name__)
 MODEL_NAME = "claude-3-5-haiku-20241022"
 MAX_TRACKS = 25
 MAX_OUTPUT_TOKENS = 2048
-TEMPERATURE = 0.6
+TEMPERATURE = 0.7
 
 
-SYSTEM_PROMPT = (
-    "You are an experienced music curator. Recommend contemporary or classic songs "
-    "that match the listener's requested mood or scenario. Always respond with a simple "
-    "list of songs in 'artist - song' format, one per line."
-)
+SYSTEM_PROMPT = """You are an expert music curator with deep knowledge of music across all genres, eras, and cultures. Your specialty is creating highly personalized, contextually perfect playlists that go beyond surface-level associations.
 
-USER_PROMPT_TEMPLATE = (
-    "Using the following context, suggest exactly 25 songs that fit the vibe. "
-    "Return ONLY a plain text list with each line in the format: artist - song\n"
-    "Do not add explanations, numbering, markdown, or any other text.\n\n"
-    "Example format:\n"
-    "The Beatles - Hey Jude\n"
-    "Pink Floyd - Comfortably Numb\n\n"
-    "Context: {context}"
-)
+Core Principles:
+1. ANALYZE EVERY WORD in the user's request - each word contributes to the intended mood, setting, and emotional tone
+2. The LANGUAGE and PHRASING matter - formal vs. casual, poetic vs. direct, all indicate different musical directions
+3. Avoid obvious, overplayed songs unless they truly fit the specific nuanced request
+4. Consider the user's actual listening preferences to ensure recommendations match their taste
+5. Think about the complete experience: tempo progression, emotional arc, and thematic coherence
+
+Always respond with ONLY a simple list of songs in 'artist - song' format, one per line. No explanations, no numbering, no markdown."""
+
+USER_PROMPT_TEMPLATE = """Create a playlist of exactly 25 songs based on the following information.
+
+=== USER REQUEST ===
+{context}
+
+CRITICAL: Analyze EVERY word in this request. Each word shapes the mood, setting, activity, time of day, emotional state, and cultural context. Do NOT just pick songs with the main keyword in the title or lyrics. Instead, capture the complete essence of what the user is asking for.
+
+{user_preferences}
+
+=== YOUR TASK ===
+Curate 25 songs that:
+1. Match the COMPLETE meaning and nuance of the request, not just keywords
+2. Align with the user's demonstrated music taste and preferences
+3. Flow well together as a cohesive listening experience
+4. Balance familiarity (from their preferences) with discovery (new artists they'll likely enjoy)
+5. Avoid generic, overplayed choices unless they're genuinely perfect for this specific request
+
+Consider:
+- The specific mood, setting, and activity described
+- Time of day implications (if any)
+- Emotional tone and energy level
+- Cultural or linguistic nuances in the phrasing
+- Whether this is for background ambiance, active listening, or a specific activity
+
+Return ONLY a plain text list with each line in the format: artist - song
+Do not add explanations, numbering, markdown, or any other text.
+
+Example format:
+The Beatles - Hey Jude
+Pink Floyd - Comfortably Numb"""
 
 
 class PlaylistPlannerError(RuntimeError):
@@ -112,7 +138,9 @@ class ClaudePlaylistPlanner:
                 raise ClaudeConfigurationError("Provide either a client or an API key, not both.")
             self._client = client
 
-    async def plan(self, *, context: str) -> PlaylistPlan:
+    async def plan(
+        self, *, context: str, user_preferences: str | None = None
+    ) -> PlaylistPlan:
         if not context.strip():
             raise PlaylistPlannerError("Context prompt must not be empty")
 
@@ -124,8 +152,20 @@ class ClaudePlaylistPlanner:
             MAX_OUTPUT_TOKENS,
         )
 
+        # Build user preferences section
+        prefs_section = ""
+        if user_preferences and user_preferences.strip():
+            prefs_section = f"=== USER'S MUSIC PREFERENCES ===\n{user_preferences.strip()}\n"
+        else:
+            prefs_section = (
+                "=== USER'S MUSIC PREFERENCES ===\n"
+                "No preference data available. Focus on the request itself.\n"
+            )
+
         try:
-            user_content = USER_PROMPT_TEMPLATE.format(context=context.strip())
+            user_content = USER_PROMPT_TEMPLATE.format(
+                context=context.strip(), user_preferences=prefs_section
+            )
             response = await self._client.messages.create(
                 model=MODEL_NAME,
                 max_tokens=MAX_OUTPUT_TOKENS,
