@@ -74,9 +74,26 @@ def _telegram_mode() -> TelegramMode:
 
 def _resolve_base_url() -> str:
     raw = getenv("WEB_BASE_URL") or getenv("APP_BASE_URL")
-    if raw is None or not raw.strip():
-        return DEFAULT_WEB_BASE_URL
-    return raw.strip().rstrip("/")
+    if raw is not None and raw.strip():
+        return raw.strip().rstrip("/")
+
+    # If WEB_BASE_URL is not set, derive it from SPOTIFY_REDIRECT_URI
+    # The redirect URI format should be: {base_url}/spotify/callback
+    redirect_uri = getenv("SPOTIFY_REDIRECT_URI")
+    if redirect_uri and redirect_uri.strip():
+        redirect_uri = redirect_uri.strip()
+        # Extract base URL by removing /spotify/callback suffix if present
+        if redirect_uri.endswith("/spotify/callback"):
+            base_url = redirect_uri[: -len("/spotify/callback")]
+            if base_url:
+                return base_url.rstrip("/")
+        # Fallback: try to extract base URL if /spotify/callback appears anywhere
+        elif "/spotify/callback" in redirect_uri:
+            base_url = redirect_uri.split("/spotify/callback")[0]
+            if base_url:
+                return base_url.rstrip("/")
+
+    return DEFAULT_WEB_BASE_URL
 
 
 @dataclass(frozen=True, slots=True)
