@@ -194,7 +194,11 @@ async def handle_mix_command(message: Message) -> None:
     settings = _get_settings(message)
     tokens = await _load_tokens(message)
 
-    user_id = message.from_user.id if message.from_user else "unknown"
+    if message.from_user is None:
+        await message.answer("I couldn't detect your Telegram account.")
+        return
+
+    user_id = message.from_user.id
     logger.info("User %s requested /mix command", user_id)
 
     if tokens is None:
@@ -218,116 +222,182 @@ async def handle_mix_command(message: Message) -> None:
 
     context = parts[1].strip()
     logger.info("User %s requesting playlist with context: %s", user_id, context)
-    status = await message.answer("Cooking up a playlist…")
 
-    planner = ClaudePlaylistPlanner(api_key=settings.anthropic_api_key)
+    now = datetime.now(tz=UTC)
+    internal_user_id: int | None = None
+    rate_limit_request_date: str | None = None
+    processing_marked = False
+    status = None
+
     try:
-        plan = await planner.plan(context=context)
-        logger.info("Successfully generated playlist plan with %d tracks", len(plan.tracks))
-    except PlaylistPlannerError as exc:
-        logger.error("Playlist planning failed for user %s: %s", user_id, exc, exc_info=True)
-        await status.edit_text(f"Claude couldn't build a playlist: {exc}")
+        async with repository.connect(settings.db_path) as connection:
+            await schema.apply_schema(connection)
+            await connection.commit()
+            await connection.execute("BEGIN IMMEDIATE")
+            profile = repository.UserProfile(
+                telegram_id=message.from_user.id,
+                username=message.from_user.username,
+                first_name=message.from_user.first_name,
+                last_name=message.from_user.last_name,
+            )
+            try:
+                internal_user_id = await repository.ensure_user(connection, profile)
+                rate_limit = await repository.check_mix_rate_limit(
+                    connection,
+                    user_id=internal_user_id,
+                    now=now,
+                )
+                if not rate_limit.allowed:
+                    await connection.rollback()
+                    await message.answer(rate_limit.reason or "Too many mixes right now, bro.")
+                    return
+                await repository.increment_mix_request(
+                    connection,
+                    user_id=internal_user_id,
+                    request_date=rate_limit.request_date,
+                    now=now,
+                )
+                await repository.mark_mix_processing(
+                    connection,
+                    user_id=internal_user_id,
+                    request_date=rate_limit.request_date,
+                    now=now,
+                )
+                await connection.commit()
+                rate_limit_request_date = rate_limit.request_date
+                processing_marked = True
+            except Exception:
+                await connection.rollback()
+                raise
+    except Exception:
+        logger.exception("Rate limiting failed for user %s", user_id)
+        await message.answer("Couldn't start the mix right now. Try again in a bit.")
         return
 
-    spotify = _get_spotify_client(message)
-    if message.from_user is None:
-        await status.edit_text("I couldn't detect your Telegram account.")
-        return
-
-    logger.info("Starting parallel Spotify search for %d tracks", len(plan.tracks))
     try:
-        found_tracks, missing_tracks = await _search_tracks_parallel(
-            spotify,
-            message.from_user.id,
-            plan.tracks,
-            max_concurrent=5,
-            batch_size=10,
-            status_message=status,
-        )
-    except SpotifyClientError as exc:
-        logger.error("Parallel search failed: %s", exc)
-        await status.edit_text(f"Spotify search failed: {exc}")
-        return
+        status = await message.answer("Cooking up a playlist…")
 
-    logger.info(
-        "Spotify search complete: %d found, %d missing", len(found_tracks), len(missing_tracks)
-    )
+        planner = ClaudePlaylistPlanner(api_key=settings.anthropic_api_key)
+        try:
+            plan = await planner.plan(context=context)
+            logger.info("Successfully generated playlist plan with %d tracks", len(plan.tracks))
+        except PlaylistPlannerError as exc:
+            logger.error("Playlist planning failed for user %s: %s", user_id, exc, exc_info=True)
+            await status.edit_text(f"Claude couldn't build a playlist: {exc}")
+            return
 
-    if not found_tracks:
-        logger.error("No tracks found on Spotify for any suggestions")
-        await status.edit_text("Couldn't match any of the suggested songs on Spotify.")
-        return
+        spotify = _get_spotify_client(message)
 
-    playlist_name = _playlist_name(context)
-    playlist_description = _playlist_description(context)
+        logger.info("Starting parallel Spotify search for %d tracks", len(plan.tracks))
+        try:
+            found_tracks, missing_tracks = await _search_tracks_parallel(
+                spotify,
+                user_id,
+                plan.tracks,
+                max_concurrent=5,
+                batch_size=10,
+                status_message=status,
+            )
+        except SpotifyClientError as exc:
+            logger.error("Parallel search failed: %s", exc)
+            await status.edit_text(f"Spotify search failed: {exc}")
+            return
 
-    logger.info("Creating Spotify playlist: %s", playlist_name)
-    try:
-        playlist = await spotify.create_playlist(
-            message.from_user.id,
-            name=playlist_name,
-            description=playlist_description,
-            public=False,
-        )
-        logger.info("Playlist created successfully")
-    except SpotifyClientError as exc:
-        logger.error("Failed to create playlist: %s", exc)
-        await status.edit_text(f"Failed to create playlist: {exc}")
-        return
-
-    playlist_id = playlist.get("id") if isinstance(playlist, dict) else None
-    playlist_url = None
-    if isinstance(playlist, dict):
-        external = playlist.get("external_urls")
-        if isinstance(external, dict):
-            playlist_url = external.get("spotify")
-
-    if not isinstance(playlist_id, str):
-        logger.error("Spotify did not return a valid playlist ID")
-        await status.edit_text("Spotify did not return a playlist identifier.")
-        return
-
-    logger.info("Adding %d tracks to playlist %s", len(found_tracks), playlist_id)
-    try:
-        await spotify.add_tracks(
-            message.from_user.id,
-            playlist_id=playlist_id,
-            track_uris=[uri for _, uri in found_tracks],
-        )
-        logger.info("Successfully added tracks to playlist")
-    except SpotifyClientError as exc:
-        logger.error("Failed to add tracks to playlist: %s", exc)
-        await status.edit_text(f"Unable to add tracks: {exc}")
-        return
-
-    summary = _summarize_tracks([track for track, _ in found_tracks])
-    message_lines = [
-        "✅ Playlist created!",
-        f"Name: <b>{playlist_name}</b>",
-    ]
-    if playlist_url:
-        message_lines.append(f"Link: <a href='{playlist_url}'>{playlist_url}</a>")
-    message_lines.append("\nTop picks:\n" + summary)
-
-    if missing_tracks:
-        missed_summary = ", ".join(
-            f"{track.title} — {track.artist}" for track in missing_tracks[:5]
-        )
-        message_lines.append(f"\nCouldn't find: {missed_summary}")
         logger.info(
-            "Playlist created with %d tracks, %d tracks could not be found",
-            len(found_tracks),
-            len(missing_tracks),
+            "Spotify search complete: %d found, %d missing", len(found_tracks), len(missing_tracks)
         )
-    else:
-        logger.info("Playlist created successfully with all %d tracks", len(found_tracks))
 
-    await status.edit_text(
-        "\n".join(message_lines),
-        parse_mode="HTML",
-        disable_web_page_preview=False,
-        reply_markup=build_playback_keyboard(),
-    )
+        if not found_tracks:
+            logger.error("No tracks found on Spotify for any suggestions")
+            await status.edit_text("Couldn't match any of the suggested songs on Spotify.")
+            return
+
+        playlist_name = _playlist_name(context)
+        playlist_description = _playlist_description(context)
+
+        logger.info("Creating Spotify playlist: %s", playlist_name)
+        try:
+            playlist = await spotify.create_playlist(
+                user_id,
+                name=playlist_name,
+                description=playlist_description,
+                public=False,
+            )
+            logger.info("Playlist created successfully")
+        except SpotifyClientError as exc:
+            logger.error("Failed to create playlist: %s", exc)
+            await status.edit_text(f"Failed to create playlist: {exc}")
+            return
+
+        playlist_id = playlist.get("id") if isinstance(playlist, dict) else None
+        playlist_url = None
+        if isinstance(playlist, dict):
+            external = playlist.get("external_urls")
+            if isinstance(external, dict):
+                playlist_url = external.get("spotify")
+
+        if not isinstance(playlist_id, str):
+            logger.error("Spotify did not return a valid playlist ID")
+            await status.edit_text("Spotify did not return a playlist identifier.")
+            return
+
+        logger.info("Adding %d tracks to playlist %s", len(found_tracks), playlist_id)
+        try:
+            await spotify.add_tracks(
+                user_id,
+                playlist_id=playlist_id,
+                track_uris=[uri for _, uri in found_tracks],
+            )
+            logger.info("Successfully added tracks to playlist")
+        except SpotifyClientError as exc:
+            logger.error("Failed to add tracks to playlist: %s", exc)
+            await status.edit_text(f"Unable to add tracks: {exc}")
+            return
+
+        summary = _summarize_tracks([track for track, _ in found_tracks])
+        message_lines = [
+            "✅ Playlist created!",
+            f"Name: <b>{playlist_name}</b>",
+        ]
+        if playlist_url:
+            message_lines.append(f"Link: <a href='{playlist_url}'>{playlist_url}</a>")
+        message_lines.append("\nTop picks:\n" + summary)
+
+        if missing_tracks:
+            missed_summary = ", ".join(
+                f"{track.title} — {track.artist}" for track in missing_tracks[:5]
+            )
+            message_lines.append(f"\nCouldn't find: {missed_summary}")
+            logger.info(
+                "Playlist created with %d tracks, %d tracks could not be found",
+                len(found_tracks),
+                len(missing_tracks),
+            )
+        else:
+            logger.info("Playlist created successfully with all %d tracks", len(found_tracks))
+
+        await status.edit_text(
+            "\n".join(message_lines),
+            parse_mode="HTML",
+            disable_web_page_preview=False,
+            reply_markup=build_playback_keyboard(),
+        )
+    finally:
+        if (
+            processing_marked
+            and internal_user_id is not None
+            and rate_limit_request_date is not None
+        ):
+            try:
+                async with repository.connect(settings.db_path) as connection:
+                    await repository.clear_mix_processing(
+                        connection,
+                        user_id=internal_user_id,
+                        request_date=rate_limit_request_date,
+                    )
+                    await connection.commit()
+            except Exception:
+                logger.exception("Failed to clear mix processing lock for user %s", user_id)
 
 
 __all__ = ["handle_mix_command", "router"]
