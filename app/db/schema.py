@@ -40,6 +40,17 @@ SCHEMA_STATEMENTS: tuple[str, ...] = (
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
     );
     """.strip(),
+    """
+    CREATE TABLE IF NOT EXISTS mix_rate_limits (
+        user_id INTEGER NOT NULL,
+        request_date TEXT NOT NULL,
+        request_count INTEGER NOT NULL DEFAULT 0,
+        last_request_at INTEGER,
+        processing_until INTEGER,
+        PRIMARY KEY (user_id, request_date),
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    );
+    """.strip(),
 )
 
 

@@ -36,5 +36,18 @@ Minimal Telegram assistant that wires up Spotify playback control and Claude-pow
 - `make test` – run pytest suite
 - `make dev` – run web callback and bot concurrently (Ctrl+C to stop)
 
+### Coolify Deployment
+1. Build the container from the root `Dockerfile` (Python 3.14 slim).
+2. Expose port `8000` and set a health check such as `GET /health`.
+3. Mount a persistent volume to `/data` so SQLite stays across deploys (`DB_PATH` defaults to `/data/app.db`).
+4. Configure environment variables:
+   - `TELEGRAM_BOT_TOKEN`
+   - `SPOTIFY_CLIENT_ID`
+   - `SPOTIFY_CLIENT_SECRET` (omit if PKCE-only)
+   - `SPOTIFY_REDIRECT_URI` (e.g. `https://<domain>/spotify/callback`)
+   - `WEB_BASE_URL` (e.g. `https://<domain>`)
+   - Optional: `ANTHROPIC_API_KEY`, `SPOTIFY_PKCE_ENABLED`, `ANTHROPIC_WEB_SEARCH_ENABLED`, `ANTHROPIC_WEB_SEARCH_MAX_USES`, `ENCRYPTION_KEY`
+5. The image runs both FastAPI and the Telegram bot via `RUN_MODE=combined`; override `PORT` or `WEB_HOST` if Coolify uses custom networking.
+
 Project tasks are tracked in the repo TODOs.
 

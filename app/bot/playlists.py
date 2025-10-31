@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import UTC, datetime
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -14,6 +15,7 @@ from ..ai.playlist_planner import (
     PlannedTrack,
     PlaylistPlannerError,
 )
+from ..db import repository, schema
 from ..spotify.client import SpotifyClientError
 from .commands import _get_settings, _get_spotify_client, _load_tokens, _send_link_prompt
 from .keyboards import build_playback_keyboard

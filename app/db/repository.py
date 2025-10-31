@@ -36,6 +36,13 @@ class SpotifyTokens:
     expires_at: datetime
 
 
+@dataclass(slots=True)
+class MixRateLimitResult:
+    allowed: bool
+    reason: str | None
+    request_date: str
+
+
 @asynccontextmanager
 async def connect(db_path: Path) -> AsyncIterator[aiosqlite.Connection]:
     """Yield an aiosqlite connection with foreign keys enforced."""
@@ -157,6 +164,148 @@ def _normalize_datetime(value: datetime) -> datetime:
     return value.astimezone(UTC)
 
 
+async def check_mix_rate_limit(
+    connection: aiosqlite.Connection,
+    *,
+    user_id: int,
+    now: datetime,
+    daily_limit: int = 20,
+    cooldown_seconds: int = 30,
+    processing_ttl_seconds: int = 60,
+) -> MixRateLimitResult:
+    """Check rate limits for the /mix command."""
+
+    normalized_now = _normalize_datetime(now)
+    current_ts = int(normalized_now.timestamp())
+    request_date = normalized_now.date().isoformat()
+
+    await connection.execute(
+        """
+        INSERT INTO mix_rate_limits (user_id, request_date)
+        VALUES (?, ?)
+        ON CONFLICT(user_id, request_date) DO NOTHING
+        """,
+        (user_id, request_date),
+    )
+
+    cursor = await connection.execute(
+        """
+        SELECT request_count, last_request_at, processing_until
+          FROM mix_rate_limits
+         WHERE user_id = ? AND request_date = ?
+        """,
+        (user_id, request_date),
+    )
+    row = await cursor.fetchone()
+    await cursor.close()
+
+    if row is None:
+        # Row should always exist thanks to INSERT DO NOTHING above.
+        return MixRateLimitResult(True, None, request_date)
+
+    processing_until = row["processing_until"]
+    if processing_until is not None and processing_until <= current_ts:
+        await connection.execute(
+            """
+            UPDATE mix_rate_limits
+               SET processing_until = NULL
+             WHERE user_id = ? AND request_date = ?
+            """,
+            (user_id, request_date),
+        )
+        processing_until = None
+
+    if processing_until is not None and processing_until > current_ts:
+        remaining = processing_until - current_ts
+        reason = "We're working on the previous one, bro. Give me a minute."
+        if remaining > 0:
+            reason = f"We're working on the previous one, bro. Give me about {remaining}s."
+        return MixRateLimitResult(False, reason, request_date)
+
+    request_count = row["request_count"] or 0
+    if request_count >= daily_limit:
+        return MixRateLimitResult(
+            False,
+            "That's enough vibes for today, bro. Max 20 mixes per day.",
+            request_date,
+        )
+
+    last_request_at = row["last_request_at"]
+    if last_request_at is not None and current_ts - last_request_at < cooldown_seconds:
+        wait_seconds = cooldown_seconds - (current_ts - last_request_at)
+        wait_seconds = max(wait_seconds, 1)
+        return MixRateLimitResult(
+            False,
+            f"Slow down bro. Wait {wait_seconds}s before the next mix.",
+            request_date,
+        )
+
+    return MixRateLimitResult(True, None, request_date)
+
+
+async def increment_mix_request(
+    connection: aiosqlite.Connection,
+    *,
+    user_id: int,
+    request_date: str,
+    now: datetime,
+) -> None:
+    """Increment daily counter and refresh last request timestamp."""
+
+    normalized_now = _normalize_datetime(now)
+    current_ts = int(normalized_now.timestamp())
+    await connection.execute(
+        """
+        UPDATE mix_rate_limits
+           SET request_count = request_count + 1,
+               last_request_at = ?
+         WHERE user_id = ? AND request_date = ?
+        """,
+        (current_ts, user_id, request_date),
+    )
+
+
+async def mark_mix_processing(
+    connection: aiosqlite.Connection,
+    *,
+    user_id: int,
+    request_date: str,
+    now: datetime,
+    ttl_seconds: int = 60,
+) -> int:
+    """Mark a user as actively processing a /mix request."""
+
+    normalized_now = _normalize_datetime(now)
+    expires_at = int(normalized_now.timestamp()) + ttl_seconds
+    await connection.execute(
+        """
+        UPDATE mix_rate_limits
+           SET processing_until = ?
+         WHERE user_id = ? AND request_date = ?
+        """,
+        (expires_at, user_id, request_date),
+    )
+    return expires_at
+
+
+async def clear_mix_processing(
+    connection: aiosqlite.Connection,
+    *,
+    user_id: int,
+    request_date: str,
+) -> None:
+    """Clear the processing flag for a user."""
+
+    await connection.execute(
+        """
+        UPDATE mix_rate_limits
+           SET processing_until = NULL
+         WHERE user_id = ? AND request_date = ?
+        """,
+        (user_id, request_date),
+    )
+
+
 async def upsert_spotify_tokens(
     connection: aiosqlite.Connection,
     *,
@@ -247,15 +396,20 @@ async def delete_spotify_tokens(connection: aiosqlite.Connection, user_id: int) 
 
 __all__ = [
     "AuthState",
+    "MixRateLimitResult",
     "SpotifyTokens",
     "UserProfile",
     "connect",
+    "check_mix_rate_limit",
+    "clear_mix_processing",
     "delete_auth_state",
     "delete_spotify_tokens",
     "ensure_user",
     "fetch_auth_state",
+    "increment_mix_request",
     "get_spotify_tokens",
     "insert_auth_state",
+    "mark_mix_processing",
     "update_access_token",
     "upsert_spotify_tokens",
 ]
