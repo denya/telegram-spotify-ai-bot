@@ -29,6 +29,14 @@ class RepositoryTokenStore:
         async with repository.connect(self.db_path) as connection:
             return await repository.get_spotify_tokens(connection, user_id)
 
+    async def load_by_telegram_id(self, telegram_id: int) -> repository.SpotifyTokens | None:
+        """Load tokens by Telegram user ID, converting to internal user ID first."""
+        async with repository.connect(self.db_path) as connection:
+            internal_user_id = await repository.get_user_id_by_telegram_id(connection, telegram_id)
+            if internal_user_id is None:
+                return None
+            return await repository.get_spotify_tokens(connection, internal_user_id)
+
     async def save(
         self,
         user_id: int,
@@ -90,7 +98,8 @@ class SpotifyClient:
     async def _get_tokens(self, user_id: int) -> repository.SpotifyTokens:
         tokens = self._cache.get(user_id)
         if tokens is None:
-            tokens = await self._token_store.load(user_id)
+            # user_id is actually telegram_id, load by telegram_id
+            tokens = await self._token_store.load_by_telegram_id(user_id)
             if tokens is None:
                 raise SpotifyClientError("Spotify not authorized for this user")
             self._cache[user_id] = tokens

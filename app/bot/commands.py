@@ -12,7 +12,7 @@ from aiogram.types import Message
 from ..config import Settings
 from ..db import repository, schema
 from ..spotify.client import RepositoryTokenStore, SpotifyClient, SpotifyClientError
-from .keyboards import build_auth_keyboard, build_playback_keyboard
+from .keyboards import build_playback_keyboard
 
 router = Router(name="commands")
 
@@ -66,15 +66,26 @@ async def _ensure_user_record(settings: Settings, message: Message) -> None:
 
 async def _load_tokens(message: Message) -> repository.SpotifyTokens | None:
     token_store = _get_token_store(message)
-    return await token_store.load(message.from_user.id) if message.from_user else None
+    return (
+        await token_store.load_by_telegram_id(message.from_user.id) if message.from_user else None
+    )
 
 
 async def _send_link_prompt(message: Message, settings: Settings) -> None:
     login_url = _build_login_url(settings, message)
-    await message.answer(
-        "Let's connect your Spotify account first.",
-        reply_markup=build_auth_keyboard(login_url),
+    is_localhost = "localhost" in login_url or "127.0.0.1" in login_url
+
+    text = (
+        "🎵 <b>Welcome to Spotify AI Bot!</b>\n\n"
+        "To get started, let's connect your Spotify account.\n"
+        "Click the link below to authorize:\n\n"
+        f"<a href='{login_url}'>🔗 Connect Spotify Account</a>"
     )
+
+    if is_localhost:
+        text += f"\n\n<b>Localhost URL:</b>\n<code>{login_url}</code>"
+
+    await message.answer(text, parse_mode="HTML")
 
 
 def _format_track(payload: dict[str, Any]) -> str:
@@ -114,10 +125,15 @@ async def handle_start(message: Message) -> None:
         await _send_link_prompt(message, settings)
         return
 
-    await message.answer(
-        "Spotify is linked. Use the controls below to manage playback.",
-        reply_markup=build_playback_keyboard(),
+    text = (
+        "✅ <b>Spotify is connected!</b>\n\n"
+        "You can now control your music. Here are the available commands:\n\n"
+        "• <code>/now</code> - See what's currently playing\n"
+        "• <code>/mix &lt;vibe&gt;</code> - Generate an AI-powered playlist\n"
+        "• <code>/help</code> - Show this help message\n\n"
+        "Use the buttons below to control playback:"
     )
+    await message.answer(text, reply_markup=build_playback_keyboard(), parse_mode="HTML")
 
 
 @router.message(Command("now"))
@@ -155,4 +171,26 @@ async def handle_now_playing(message: Message) -> None:
     )
 
 
-__all__ = ["handle_now_playing", "handle_start", "router"]
+@router.message(Command("help"))
+async def handle_help(message: Message) -> None:
+    text = (
+        "🎵 <b>Spotify AI Bot Commands</b>\n\n"
+        "<b>Playback Controls:</b>\n"
+        "• <code>/now</code> - Show current track and playback controls\n"
+        "• Use inline buttons to play, pause, skip, or rewind\n\n"
+        "<b>AI Playlist Generation:</b>\n"
+        "• <code>/mix &lt;your vibe&gt;</code> - Create a custom playlist\n"
+        "  Examples:\n"
+        "  • <code>/mix chill coding music</code>\n"
+        "  • <code>/mix sunset rooftop vibes</code>\n"
+        "  • <code>/mix workout energy</code>\n"
+        "  • <code>/mix dreamy vitamin d</code>\n\n"
+        "<b>Other:</b>\n"
+        "• <code>/start</code> - Restart the bot and connect Spotify\n"
+        "• <code>/help</code> - Show this message\n\n"
+        "Note: Make sure your Spotify account is connected via <code>/start</code>"
+    )
+    await message.answer(text, parse_mode="HTML", reply_markup=build_playback_keyboard())
+
+
+__all__ = ["handle_help", "handle_now_playing", "handle_start", "router"]

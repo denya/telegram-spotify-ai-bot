@@ -49,6 +49,17 @@ async def connect(db_path: Path) -> AsyncIterator[aiosqlite.Connection]:
         await connection.close()
 
 
+async def get_user_id_by_telegram_id(
+    connection: aiosqlite.Connection, telegram_id: int
+) -> int | None:
+    """Return the internal user id for a given Telegram user id, if it exists."""
+
+    cursor = await connection.execute("SELECT id FROM users WHERE telegram_id = ?", (telegram_id,))
+    row = await cursor.fetchone()
+    await cursor.close()
+    return int(row["id"]) if row is not None else None
+
+
 async def ensure_user(connection: aiosqlite.Connection, profile: UserProfile) -> int:
     """Return an internal user id for the provided Telegram profile."""
 
