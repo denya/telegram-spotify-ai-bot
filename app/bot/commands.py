@@ -244,4 +244,49 @@ async def handle_help(message: Message) -> None:
     await message.answer(text, parse_mode="HTML", reply_markup=build_playback_keyboard())
 
 
-__all__ = ["handle_help", "handle_now_playing", "handle_start", "router"]
+@router.message(Command("stats"))
+async def handle_stats(message: Message) -> None:
+    """Admin-only command to view bot statistics."""
+    if message.from_user is None:
+        return
+
+    settings = _get_settings(message)
+
+    # Check if user is administrator
+    if settings.administrator_user_id is None:
+        await message.answer("❌ Administrator access is not configured.")
+        return
+
+    if message.from_user.id != settings.administrator_user_id:
+        await message.answer("❌ Access denied. This command is for administrators only.")
+        return
+
+    # Fetch statistics
+    async with repository.connect(settings.db_path) as connection:
+        await schema.apply_schema(connection)
+        bot_stats = await repository.get_bot_stats(connection)
+        recent_users = await repository.get_recent_users(connection, limit=10)
+        await connection.commit()
+
+    # Format overview
+    text = (
+        "📊 <b>Bot Statistics</b>\n\n"
+        f"👥 Total Users: <b>{bot_stats.total_users}</b>\n"
+        f"🎵 Users with Spotify: <b>{bot_stats.users_with_spotify}</b>\n"
+        f"🔀 Total /mix Requests: <b>{bot_stats.total_mix_requests}</b>\n"
+        f"🔥 Active Users Today: <b>{bot_stats.users_today}</b>\n\n"
+        "👤 <b>Latest 10 Users:</b>\n"
+    )
+
+    # Format recent users
+    for idx, user in enumerate(recent_users, 1):
+        spotify_status = "✅" if user.has_spotify else "❌"
+        name = user.first_name or user.username or f"ID:{user.telegram_id}"
+        mix_info = f"🎵 {user.total_mix_requests}" if user.total_mix_requests > 0 else ""
+        last_request = f" (last: {user.last_request_date})" if user.last_request_date else ""
+        text += f"{idx}. {spotify_status} {name} {mix_info}{last_request}\n"
+
+    await message.answer(text, parse_mode="HTML")
+
+
+__all__ = ["handle_help", "handle_now_playing", "handle_start", "handle_stats", "router"]

@@ -43,6 +43,30 @@ class MixRateLimitResult:
     request_date: str
 
 
+@dataclass(slots=True)
+class UserStats:
+    """Statistics for a user."""
+
+    telegram_id: int
+    username: str | None
+    first_name: str | None
+    last_name: str | None
+    created_at: str
+    has_spotify: bool
+    total_mix_requests: int
+    last_request_date: str | None
+
+
+@dataclass(slots=True)
+class BotStats:
+    """Overall bot statistics."""
+
+    total_users: int
+    users_with_spotify: int
+    total_mix_requests: int
+    users_today: int
+
+
 @asynccontextmanager
 async def connect(db_path: Path) -> AsyncIterator[aiosqlite.Connection]:
     """Yield an aiosqlite connection with foreign keys enforced."""
@@ -67,9 +91,7 @@ async def get_user_id_by_telegram_id(
     return int(row["id"]) if row is not None else None
 
 
-async def get_telegram_id_by_user_id(
-    connection: aiosqlite.Connection, user_id: int
-) -> int | None:
+async def get_telegram_id_by_user_id(connection: aiosqlite.Connection, user_id: int) -> int | None:
     """Return the Telegram user id for a given internal user id, if it exists."""
 
     cursor = await connection.execute("SELECT telegram_id FROM users WHERE id = ?", (user_id,))
@@ -405,11 +427,107 @@ async def delete_spotify_tokens(connection: aiosqlite.Connection, user_id: int) 
     await connection.execute("DELETE FROM spotify_tokens WHERE user_id = ?", (user_id,))
 
 
+async def get_bot_stats(connection: aiosqlite.Connection) -> BotStats:
+    """Return overall bot statistics."""
+
+    # Total users
+    cursor = await connection.execute("SELECT COUNT(*) as count FROM users")
+    row = await cursor.fetchone()
+    total_users = int(row["count"]) if row else 0
+    await cursor.close()
+
+    # Users with Spotify connected
+    cursor = await connection.execute("SELECT COUNT(*) as count FROM spotify_tokens")
+    row = await cursor.fetchone()
+    users_with_spotify = int(row["count"]) if row else 0
+    await cursor.close()
+
+    # Total mix requests
+    cursor = await connection.execute("SELECT SUM(request_count) as total FROM mix_rate_limits")
+    row = await cursor.fetchone()
+    total_mix_requests = int(row["total"]) if row and row["total"] else 0
+    await cursor.close()
+
+    # Users who made requests today
+    today = datetime.now(UTC).date().isoformat()
+    cursor = await connection.execute(
+        "SELECT COUNT(DISTINCT user_id) as count FROM mix_rate_limits WHERE request_date = ?",
+        (today,),
+    )
+    row = await cursor.fetchone()
+    users_today = int(row["count"]) if row else 0
+    await cursor.close()
+
+    return BotStats(
+        total_users=total_users,
+        users_with_spotify=users_with_spotify,
+        total_mix_requests=total_mix_requests,
+        users_today=users_today,
+    )
+
+
+async def get_recent_users(connection: aiosqlite.Connection, limit: int = 10) -> list[UserStats]:
+    """Return statistics for the most recent users."""
+
+    cursor = await connection.execute(
+        """
+        SELECT
+            u.telegram_id,
+            u.username,
+            u.first_name,
+            u.last_name,
+            u.created_at,
+            CASE WHEN st.user_id IS NOT NULL THEN 1 ELSE 0 END as has_spotify
+        FROM users u
+        LEFT JOIN spotify_tokens st ON u.id = st.user_id
+        ORDER BY u.created_at DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    rows = await cursor.fetchall()
+    await cursor.close()
+
+    result = []
+    for row in rows:
+        telegram_id = row["telegram_id"]
+        # Get mix stats for this user
+        cursor = await connection.execute(
+            """
+            SELECT SUM(request_count) as total, MAX(request_date) as last_date
+            FROM mix_rate_limits
+            WHERE user_id IN (SELECT id FROM users WHERE telegram_id = ?)
+            """,
+            (telegram_id,),
+        )
+        mix_row = await cursor.fetchone()
+        total_mix = int(mix_row["total"]) if mix_row and mix_row["total"] else 0
+        last_request = mix_row["last_date"] if mix_row else None
+        await cursor.close()
+
+        result.append(
+            UserStats(
+                telegram_id=telegram_id,
+                username=row["username"],
+                first_name=row["first_name"],
+                last_name=row["last_name"],
+                created_at=row["created_at"],
+                has_spotify=bool(row["has_spotify"]),
+                total_mix_requests=total_mix,
+                last_request_date=last_request,
+            )
+        )
+
+    return result
+
+
 __all__ = [
     "AuthState",
+    "BotStats",
     "MixRateLimitResult",
     "SpotifyTokens",
     "UserProfile",
+    "UserStats",
     "check_mix_rate_limit",
     "clear_mix_processing",
     "connect",
@@ -417,6 +535,8 @@ __all__ = [
     "delete_spotify_tokens",
     "ensure_user",
     "fetch_auth_state",
+    "get_bot_stats",
+    "get_recent_users",
     "get_spotify_tokens",
     "get_telegram_id_by_user_id",
     "get_user_id_by_telegram_id",

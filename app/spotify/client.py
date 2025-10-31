@@ -122,7 +122,7 @@ class SpotifyClient:
         persisted_refresh = response.refresh_token or refresh_token
         expires_at = spotify_auth.compute_expiry(response.expires_in)
         updated = await self._token_store.save(
-            user_id,
+            tokens.user_id,  # Use internal database user_id, not telegram_id
             access_token=response.access_token,
             refresh_token=persisted_refresh,
             scope=scope,

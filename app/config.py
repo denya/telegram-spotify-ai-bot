@@ -101,11 +101,14 @@ class Settings:
 
     db_path: Path
     encryption_key: str | None
+    administrator_user_id: int | None
 
     @classmethod
     def from_env(cls) -> Settings:
         spotify_redirect_uri = _require("SPOTIFY_REDIRECT_URI")
         web_base_url = _resolve_base_url(spotify_redirect_uri)
+        administrator_user_id = getenv("ADMINISTRATOR_USER_ID")
+        admin_id = int(administrator_user_id) if administrator_user_id else None
         return cls(
             telegram_bot_token=_require("TELEGRAM_BOT_TOKEN"),
             telegram_mode=_telegram_mode(),
@@ -123,6 +126,7 @@ class Settings:
             ),
             db_path=Path(getenv("DB_PATH", DEFAULT_DB_PATH)),
             encryption_key=(getenv("ENCRYPTION_KEY") or None),
+            administrator_user_id=admin_id,
         )
 
 
