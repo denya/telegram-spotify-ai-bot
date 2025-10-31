@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Annotated
+from typing import Annotated, Any
 
 import aiosqlite
 from aiogram import Bot
@@ -136,9 +136,7 @@ async def authorization_callback(
             expires_at=expires_at,
         )
         # Get telegram_id for sending notification
-        telegram_id = await repository.get_telegram_id_by_user_id(
-            connection, auth_state.user_id
-        )
+        telegram_id = await repository.get_telegram_id_by_user_id(connection, auth_state.user_id)
         await repository.delete_auth_state(connection, state)
         await connection.commit()
 

@@ -67,9 +67,7 @@ async def get_user_id_by_telegram_id(
     return int(row["id"]) if row is not None else None
 
 
-async def get_telegram_id_by_user_id(
-    connection: aiosqlite.Connection, user_id: int
-) -> int | None:
+async def get_telegram_id_by_user_id(connection: aiosqlite.Connection, user_id: int) -> int | None:
     """Return the Telegram user id for a given internal user id, if it exists."""
 
     cursor = await connection.execute("SELECT telegram_id FROM users WHERE id = ?", (user_id,))
