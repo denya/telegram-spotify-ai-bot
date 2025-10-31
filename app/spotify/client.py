@@ -14,6 +14,7 @@ import httpx
 from ..config import Settings
 from ..db import repository
 from . import auth as spotify_auth
+from .auth import RevokedTokenError
 
 
 class SpotifyClientError(RuntimeError):
@@ -112,11 +113,23 @@ class SpotifyClient:
         refresh_token = tokens.refresh_token
         if refresh_token is None:
             raise SpotifyClientError("No refresh token stored for user")
-        response = await spotify_auth.refresh_access_token(
-            client_id=self._client_id,
-            client_secret=self._client_secret,
-            refresh_token=refresh_token,
-        )
+        try:
+            response = await spotify_auth.refresh_access_token(
+                client_id=self._client_id,
+                client_secret=self._client_secret,
+                refresh_token=refresh_token,
+            )
+        except RevokedTokenError as exc:
+            # Clear revoked tokens from database and cache
+            async with repository.connect(self._token_store.db_path) as connection:
+                await repository.delete_spotify_tokens(connection, tokens.user_id)
+                await connection.commit()
+            # Clear from cache
+            self._cache.pop(user_id, None)
+            # Re-raise with user-friendly message
+            raise SpotifyClientError(
+                "Your Spotify authorization has expired. Please reconnect your account using /start"
+            ) from exc
         scope = response.scope or tokens.scope
         token_type = response.token_type or tokens.token_type
         persisted_refresh = response.refresh_token or refresh_token

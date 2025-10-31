@@ -204,7 +204,12 @@ async def handle_now_playing(message: Message) -> None:
     try:
         playback = await spotify.get_currently_playing(message.from_user.id)
     except SpotifyClientError as exc:
-        await message.answer(f"Spotify request failed: {exc}")
+        error_msg = str(exc)
+        # Check if this is an expired/revoked token error
+        if "authorization has expired" in error_msg.lower() or "reconnect" in error_msg.lower():
+            await _send_link_prompt(message, settings)
+        else:
+            await message.answer(f"Spotify request failed: {error_msg}")
         return
 
     if not playback:

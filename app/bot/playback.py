@@ -71,8 +71,17 @@ async def handle_playback_callback(callback: CallbackQuery, callback_data: Playb
             return
     except SpotifyClientError as exc:
         error_msg = str(exc)
-        # Extract user-friendly message if available
-        if "Restricted device" in error_msg or "No controllable device available" in error_msg:
+        # Check if this is an expired/revoked token error
+        if "authorization has expired" in error_msg.lower() or "reconnect" in error_msg.lower():
+            await _send_link_prompt_for_user(
+                message,
+                settings,
+                user.id,
+                user.username or "",
+                user.first_name or "",
+                user.last_name or "",
+            )
+        elif "Restricted device" in error_msg or "No controllable device available" in error_msg:
             await message.answer(
                 "This device can't be controlled. Transfer playback to a controllable "
                 "device (phone/computer) to continue?",
@@ -86,7 +95,18 @@ async def handle_playback_callback(callback: CallbackQuery, callback_data: Playb
     try:
         playback = await spotify.get_currently_playing(user.id)
     except SpotifyClientError as exc:
-        await message.answer(f"Unable to fetch now playing: {exc}")
+        error_msg = str(exc)
+        if "authorization has expired" in error_msg.lower() or "reconnect" in error_msg.lower():
+            await _send_link_prompt_for_user(
+                message,
+                settings,
+                user.id,
+                user.username or "",
+                user.first_name or "",
+                user.last_name or "",
+            )
+        else:
+            await message.answer(f"Unable to fetch now playing: {error_msg}")
 
     if playback:
         await message.answer(
@@ -130,14 +150,37 @@ async def handle_transfer_confirm(callback: CallbackQuery, callback_data: Transf
         else:
             return
     except SpotifyClientError as exc:
-        await message.answer(f"❌ Spotify error after transfer: {exc}")
+        error_msg = str(exc)
+        if "authorization has expired" in error_msg.lower() or "reconnect" in error_msg.lower():
+            await _send_link_prompt_for_user(
+                message,
+                _get_settings(message),
+                user.id,
+                user.username or "",
+                user.first_name or "",
+                user.last_name or "",
+            )
+        else:
+            await message.answer(f"❌ Spotify error after transfer: {error_msg}")
         return
 
     # Show updated now playing
+    settings = _get_settings(message)
     try:
         playback = await spotify.get_currently_playing(user.id)
     except SpotifyClientError as exc:
-        await message.answer(f"Unable to fetch now playing: {exc}")
+        error_msg = str(exc)
+        if "authorization has expired" in error_msg.lower() or "reconnect" in error_msg.lower():
+            await _send_link_prompt_for_user(
+                message,
+                settings,
+                user.id,
+                user.username or "",
+                user.first_name or "",
+                user.last_name or "",
+            )
+        else:
+            await message.answer(f"Unable to fetch now playing: {error_msg}")
         return
 
     if playback:

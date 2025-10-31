@@ -24,6 +24,10 @@ class SpotifyAuthError(RuntimeError):
     """Raised when an OAuth exchange with Spotify fails."""
 
 
+class RevokedTokenError(SpotifyAuthError):
+    """Raised when a refresh token has been revoked and re-authentication is required."""
+
+
 @dataclass(slots=True)
 class TokenResponse:
     """Normalized token payload returned by Spotify."""
@@ -111,6 +115,17 @@ async def _post_token_request(
     try:
         response = await http.post(TOKEN_URL, data=data, headers=headers)
         if response.status_code >= 400:
+            # Check if this is a revoked token error
+            try:
+                error_data = response.json()
+                if isinstance(error_data, dict):
+                    error = error_data.get("error")
+                    error_description = error_data.get("error_description", "")
+                    if error == "invalid_grant" and "revoked" in error_description.lower():
+                        raise RevokedTokenError("Refresh token has been revoked")
+            except (ValueError, TypeError, AttributeError):
+                # Failed to parse JSON or check error, fall through to generic error
+                pass
             raise SpotifyAuthError(
                 f"Spotify token endpoint returned {response.status_code}: {response.text}"
             )
@@ -214,6 +229,7 @@ __all__ = [
     "AUTHORIZE_URL",
     "DEFAULT_SCOPES",
     "TOKEN_URL",
+    "RevokedTokenError",
     "SpotifyAuthError",
     "TokenResponse",
     "build_authorization_url",
