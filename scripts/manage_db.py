@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import argparse
 import sqlite3
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Iterable
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 MIGRATIONS_DIR = ROOT_DIR / "db" / "migrations"

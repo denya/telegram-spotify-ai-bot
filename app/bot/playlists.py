@@ -86,12 +86,14 @@ async def _fetch_user_preferences(spotify, user_id: int) -> str:
                     track_name = track.get("name")
                     artists = track.get("artists", [])
                     if track_name and isinstance(artists, list) and artists:
-                        artist_name = artists[0].get("name") if isinstance(artists[0], dict) else None
+                        artist_name = (
+                            artists[0].get("name") if isinstance(artists[0], dict) else None
+                        )
                         if artist_name:
                             recent_tracks.append(f"{artist_name} - {track_name}")
             if recent_tracks:
                 preferences_parts.append(
-                    f"Recently Loved Tracks:\n  " + "\n  ".join(recent_tracks[:6])
+                    "Recently Loved Tracks:\n  " + "\n  ".join(recent_tracks[:6])
                 )
         
         # Process recently played to understand current listening patterns
@@ -103,7 +105,9 @@ async def _fetch_user_preferences(spotify, user_id: int) -> str:
                     if isinstance(track, dict):
                         artists = track.get("artists", [])
                         if isinstance(artists, list) and artists:
-                            artist_name = artists[0].get("name") if isinstance(artists[0], dict) else None
+                            artist_name = (
+                                artists[0].get("name") if isinstance(artists[0], dict) else None
+                            )
                             if artist_name and artist_name not in recent_artists:
                                 recent_artists.append(artist_name)
             if recent_artists:
@@ -383,7 +387,9 @@ async def handle_mix_command(message: Message) -> None:
         try:
             user_preferences = await _fetch_user_preferences(spotify, user_id)
             if user_preferences:
-                logger.info("User preferences fetched successfully, %d chars", len(user_preferences))
+                logger.info(
+                    "User preferences fetched successfully, %d chars", len(user_preferences)
+                )
             else:
                 logger.info("No user preferences available, will use request only")
         except Exception as exc:
