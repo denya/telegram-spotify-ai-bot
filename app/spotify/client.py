@@ -192,7 +192,7 @@ class SpotifyClient:
 
     async def get_profile(self, user_id: int) -> dict[str, Any]:
         response = await self._request(user_id, "GET", "/me")
-        return response.json()
+        return response.json()  # type: ignore[no-any-return]
 
     async def get_currently_playing(self, user_id: int) -> dict[str, Any] | None:
         response = await self._request(
@@ -203,7 +203,7 @@ class SpotifyClient:
         )
         if response.status_code == 204 or not response.content:
             return None
-        return response.json()
+        return response.json()  # type: ignore[no-any-return]
 
     async def get_player(self, user_id: int) -> dict[str, Any] | None:
         """Get information about the user's current playback state."""
@@ -215,7 +215,7 @@ class SpotifyClient:
         )
         if response.status_code == 204 or not response.content:
             return None
-        return response.json()
+        return response.json()  # type: ignore[no-any-return]
 
     async def get_devices(self, user_id: int) -> list[dict[str, Any]]:
         """Get the list of devices available for the user."""
@@ -476,7 +476,7 @@ class SpotifyClient:
             json={"name": name, "description": description, "public": public},
             expected_status=(201,),
         )
-        return response.json()
+        return response.json()  # type: ignore[no-any-return]
 
     async def add_tracks(
         self,
@@ -492,7 +492,7 @@ class SpotifyClient:
             json={"uris": list(track_uris)},
             expected_status=(201,),
         )
-        return response.json()
+        return response.json()  # type: ignore[no-any-return]
 
     async def get_top_artists(
         self,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from aiogram import Router
-from aiogram.types import CallbackQuery
+from aiogram.types import CallbackQuery, InaccessibleMessage
 
 from ..spotify.client import SpotifyClientError
 from .commands import (
@@ -37,7 +37,7 @@ async def handle_playback_callback(callback: CallbackQuery, callback_data: Playb
     user = callback.from_user
     await callback.answer()
 
-    if message is None or user is None:
+    if message is None or user is None or isinstance(message, InaccessibleMessage):
         return
 
     settings = _get_settings(message)
@@ -107,7 +107,7 @@ async def handle_transfer_confirm(callback: CallbackQuery, callback_data: Transf
     user = callback.from_user
     await callback.answer()
 
-    if message is None or user is None:
+    if message is None or user is None or isinstance(message, InaccessibleMessage):
         return
 
     spotify = _get_spotify_client(message)

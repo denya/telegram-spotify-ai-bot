@@ -105,6 +105,8 @@ async def ensure_user(connection: aiosqlite.Connection, profile: UserProfile) ->
     )
     last_row_id = cursor.lastrowid
     await cursor.close()
+    if last_row_id is None:
+        raise RuntimeError("Failed to get lastrowid after insert")
     return int(last_row_id)
 
 
