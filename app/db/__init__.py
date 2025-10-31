@@ -1,3 +1,5 @@
 """Database helpers for SQLite persistence."""
 
-__all__ = ["schema"]
+from . import repository, schema
+
+__all__ = ["repository", "schema"]

@@ -7,7 +7,6 @@ from typing import Any
 
 from fastapi import APIRouter
 
-
 router = APIRouter(tags=["health"])
 _start_time = time.monotonic()
 
@@ -20,4 +19,4 @@ async def healthcheck() -> dict[str, Any]:
     return {"status": "ok", "uptime_seconds": uptime_seconds}
 
 
-__all__ = ["router", "healthcheck"]
+__all__ = ["healthcheck", "router"]

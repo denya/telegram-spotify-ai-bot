@@ -2,8 +2,8 @@
 
 __all__ = [
     "commands",
+    "keyboards",
+    "middleware",
     "playback",
     "playlists",
-    "middleware",
-    "keyboards",
 ]

@@ -1,6 +1,3 @@
-def load_settings() -> None:
-"""Environment-based configuration loader."""
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,11 +11,19 @@ from dotenv import load_dotenv
 from .types import TelegramMode
 
 DEFAULT_DB_PATH: Final[str] = "./data/app.db"
-DEFAULT_APP_BASE_URL: Final[str] = "http://localhost:8000"
+DEFAULT_WEB_BASE_URL: Final[str] = "http://localhost:8000"
 DEFAULT_TELEGRAM_MODE: Final[TelegramMode] = "polling"
 DEFAULT_SPOTIFY_PKCE_ENABLED: Final[bool] = True
 DEFAULT_ANTHROPIC_WEB_SEARCH_ENABLED: Final[bool] = True
 DEFAULT_ANTHROPIC_WEB_SEARCH_MAX_USES: Final[int] = 3
+
+SPOTIFY_SCOPES: Final[tuple[str, ...]] = (
+    "user-read-playback-state",
+    "user-modify-playback-state",
+    "user-read-currently-playing",
+    "playlist-modify-private",
+    "playlist-modify-public",
+)
 
 
 load_dotenv()
@@ -67,13 +72,20 @@ def _telegram_mode() -> TelegramMode:
     return cast(TelegramMode, mode)
 
 
+def _resolve_base_url() -> str:
+    raw = getenv("WEB_BASE_URL") or getenv("APP_BASE_URL")
+    if raw is None or not raw.strip():
+        return DEFAULT_WEB_BASE_URL
+    return raw.strip().rstrip("/")
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     """Strongly typed configuration values backed by environment variables."""
 
     telegram_bot_token: str
     telegram_mode: TelegramMode
-    app_base_url: str
+    web_base_url: str
 
     spotify_client_id: str
     spotify_client_secret: str | None
@@ -88,11 +100,11 @@ class Settings:
     encryption_key: str | None
 
     @classmethod
-    def from_env(cls) -> "Settings":
+    def from_env(cls) -> Settings:
         return cls(
             telegram_bot_token=_require("TELEGRAM_BOT_TOKEN"),
             telegram_mode=_telegram_mode(),
-            app_base_url=getenv("APP_BASE_URL", DEFAULT_APP_BASE_URL).rstrip("/"),
+            web_base_url=_resolve_base_url(),
             spotify_client_id=_require("SPOTIFY_CLIENT_ID"),
             spotify_client_secret=(getenv("SPOTIFY_CLIENT_SECRET") or None),
             spotify_redirect_uri=_require("SPOTIFY_REDIRECT_URI"),
@@ -116,4 +128,4 @@ def load_settings() -> Settings:
     return Settings.from_env()
 
 
-__all__ = ["ConfigurationError", "Settings", "load_settings"]
+__all__ = ["SPOTIFY_SCOPES", "ConfigurationError", "Settings", "load_settings"]

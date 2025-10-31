@@ -17,7 +17,7 @@ ifeq ($(strip $(PYTHON)),)
 $(error Could not determine a Python interpreter. Install Python or configure pyenv.)
 endif
 
-.PHONY: install run format lint test python-info pyenv-bootstrap
+.PHONY: install run fmt format lint test python-info pyenv-bootstrap run-bot run-web dev
 
 python-info:
 	@printf "Python command: %s\n" "$(PYTHON)"
@@ -50,9 +50,29 @@ pyenv-bootstrap:
 
 install:
 	$(PYTHON) -m pip install -r requirements.txt
+	$(PYTHON) -m pip install -r requirements-dev.txt
 
 run:
 	$(PYTHON) -m app.main
+
+run-bot:
+	$(PYTHON) -m app.main
+
+run-web:
+	$(PYTHON) -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload
+
+dev:
+	@echo "Starting web (http://127.0.0.1:8000) and Telegram bot. Press Ctrl+C to stop." \
+	&& set -e; \
+	$(PYTHON) -m uvicorn app.main:app --host 127.0.0.1 --port 8000 --reload & \
+	WEB_PID=$$!; \
+	STATUS=0; \
+	$(PYTHON) -m app.main || STATUS=$$?; \
+	kill $$WEB_PID 2>/dev/null || true; \
+	wait $$WEB_PID 2>/dev/null || true; \
+	exit $$STATUS
+
+fmt: format
 
 format:
 	$(PYTHON) -m ruff check --fix app tests
