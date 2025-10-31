@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Annotated
+from typing import Annotated, Any
 
 import aiosqlite
 from aiogram import Bot
@@ -136,9 +136,7 @@ async def authorization_callback(
             expires_at=expires_at,
         )
         # Get telegram_id for sending notification
-        telegram_id = await repository.get_telegram_id_by_user_id(
-            connection, auth_state.user_id
-        )
+        telegram_id = await repository.get_telegram_id_by_user_id(connection, auth_state.user_id)
         await repository.delete_auth_state(connection, state)
         await connection.commit()
 
@@ -207,7 +205,8 @@ def _format_track(payload: dict[str, Any]) -> str:
         artist.get("name", "?") for artist in item.get("artists", []) if isinstance(artist, dict)
     )
     album = (item.get("album") or {}).get("name") if isinstance(item.get("album"), dict) else None
-    external = item.get("external_urls") if isinstance(item.get("external_urls"), dict) else {}
+    external_urls = item.get("external_urls")
+    external: dict[str, Any] = external_urls if isinstance(external_urls, dict) else {}
     url = external.get("spotify")
     device = payload.get("device") if isinstance(payload.get("device"), dict) else None
     device_name = device.get("name") if isinstance(device, dict) else None

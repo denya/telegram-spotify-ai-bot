@@ -148,7 +148,8 @@ def _format_track(payload: dict[str, Any]) -> str:
         artist.get("name", "?") for artist in item.get("artists", []) if isinstance(artist, dict)
     )
     album = (item.get("album") or {}).get("name") if isinstance(item.get("album"), dict) else None
-    external = item.get("external_urls") if isinstance(item.get("external_urls"), dict) else {}
+    external_urls = item.get("external_urls")
+    external: dict[str, Any] = external_urls if isinstance(external_urls, dict) else {}
     url = external.get("spotify")
     device = payload.get("device") if isinstance(payload.get("device"), dict) else None
     device_name = device.get("name") if isinstance(device, dict) else None

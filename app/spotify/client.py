@@ -219,7 +219,7 @@ class SpotifyClient:
 
     async def get_profile(self, user_id: int) -> dict[str, Any]:
         response = await self._request(user_id, "GET", "/me")
-        return response.json()
+        return response.json()  # type: ignore[no-any-return]
 
     async def get_currently_playing(self, user_id: int) -> dict[str, Any] | None:
         response = await self._request(
@@ -230,7 +230,7 @@ class SpotifyClient:
         )
         if response.status_code == 204 or not response.content:
             return None
-        return response.json()
+        return response.json()  # type: ignore[no-any-return]
 
     async def get_player(self, user_id: int) -> dict[str, Any] | None:
         """Get information about the user's current playback state."""
@@ -242,7 +242,7 @@ class SpotifyClient:
         )
         if response.status_code == 204 or not response.content:
             return None
-        return response.json()
+        return response.json()  # type: ignore[no-any-return]
 
     async def get_devices(self, user_id: int) -> list[dict[str, Any]]:
         """Get the list of devices available for the user."""
@@ -503,7 +503,7 @@ class SpotifyClient:
             json={"name": name, "description": description, "public": public},
             expected_status=(201,),
         )
-        return response.json()
+        return response.json()  # type: ignore[no-any-return]
 
     async def add_tracks(
         self,
@@ -519,7 +519,88 @@ class SpotifyClient:
             json={"uris": list(track_uris)},
             expected_status=(201,),
         )
-        return response.json()
+        return response.json()  # type: ignore[no-any-return]
+
+    async def get_top_artists(
+        self,
+        user_id: int,
+        *,
+        time_range: str = "medium_term",
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """
+        Get user's top artists.
+
+        Args:
+            user_id: Telegram user ID
+            time_range: Time range for top artists - "short_term" (4 weeks),
+                       "medium_term" (6 months), or "long_term" (several years)
+            limit: Number of artists to return (max 50)
+        """
+        response = await self._request(
+            user_id,
+            "GET",
+            "/me/top/artists",
+            params={"time_range": time_range, "limit": min(limit, 50)},
+        )
+        payload = response.json()
+        items = payload.get("items")
+        if not isinstance(items, list):
+            return []
+        return items
+
+    async def get_top_tracks(
+        self,
+        user_id: int,
+        *,
+        time_range: str = "medium_term",
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        """
+        Get user's top tracks.
+
+        Args:
+            user_id: Telegram user ID
+            time_range: Time range for top tracks - "short_term" (4 weeks),
+                       "medium_term" (6 months), or "long_term" (several years)
+            limit: Number of tracks to return (max 50)
+        """
+        response = await self._request(
+            user_id,
+            "GET",
+            "/me/top/tracks",
+            params={"time_range": time_range, "limit": min(limit, 50)},
+        )
+        payload = response.json()
+        items = payload.get("items")
+        if not isinstance(items, list):
+            return []
+        return items
+
+    async def get_recently_played(
+        self,
+        user_id: int,
+        *,
+        limit: int = 50,
+    ) -> list[dict[str, Any]]:
+        """
+        Get user's recently played tracks.
+
+        Args:
+            user_id: Telegram user ID
+            limit: Number of recently played items to return (max 50)
+        """
+        response = await self._request(
+            user_id,
+            "GET",
+            "/me/player/recently-played",
+            params={"limit": min(limit, 50)},
+        )
+        payload = response.json()
+        items = payload.get("items")
+        if not isinstance(items, list):
+            return []
+        return items
 
 
 __all__ = [

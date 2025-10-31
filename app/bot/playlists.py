@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
+from typing import Any
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -17,13 +18,116 @@ from ..ai.playlist_planner import (
     PlaylistPlannerError,
 )
 from ..db import repository, schema
-from ..spotify.client import SpotifyClientError
+from ..spotify.client import SpotifyClient, SpotifyClientError
 from .commands import _get_settings, _get_spotify_client, _load_tokens, _send_link_prompt
 from .keyboards import build_playback_keyboard
 
 logger = logging.getLogger(__name__)
 
 router = Router(name="playlists")
+
+
+async def _fetch_user_preferences(spotify: SpotifyClient, user_id: int) -> str:
+    """Fetch and format user's Spotify preferences for the AI prompt."""
+    logger.info("Fetching user preferences for user %s", user_id)
+
+    preferences_parts = []
+
+    try:
+        # Fetch multiple time ranges in parallel for a comprehensive view
+        results = await asyncio.gather(
+            spotify.get_top_artists(user_id, time_range="medium_term", limit=15),
+            spotify.get_top_artists(user_id, time_range="long_term", limit=10),
+            spotify.get_top_tracks(user_id, time_range="short_term", limit=10),
+            spotify.get_recently_played(user_id, limit=20),
+            return_exceptions=True,
+        )
+        top_artists_medium: list[dict[str, Any]] | BaseException = results[0]
+        top_artists_long: list[dict[str, Any]] | BaseException = results[1]
+        top_tracks_recent: list[dict[str, Any]] | BaseException = results[2]
+        recently_played: list[dict[str, Any]] | BaseException = results[3]
+
+        # Process top artists (medium term - last 6 months)
+        if not isinstance(top_artists_medium, BaseException) and top_artists_medium:
+            artist_names = []
+            genres = set()
+            for artist in top_artists_medium[:15]:
+                if isinstance(artist, dict):
+                    name = artist.get("name")
+                    if name:
+                        artist_names.append(name)
+                    artist_genres = artist.get("genres", [])
+                    if isinstance(artist_genres, list):
+                        genres.update(artist_genres[:3])  # Top 3 genres per artist
+
+            if artist_names:
+                preferences_parts.append(
+                    f"Favorite Artists (last 6 months): {', '.join(artist_names[:10])}"
+                )
+            if genres:
+                # Limit to most relevant genres
+                genre_list = sorted(list(genres))[:12]
+                preferences_parts.append(f"Preferred Genres: {', '.join(genre_list)}")
+
+        # Process long-term favorites for deeper understanding
+        if not isinstance(top_artists_long, BaseException) and top_artists_long:
+            long_term_artists = []
+            for artist in top_artists_long[:5]:
+                if isinstance(artist, dict):
+                    name = artist.get("name")
+                    if name:
+                        long_term_artists.append(name)
+            if long_term_artists:
+                preferences_parts.append(f"All-Time Favorites: {', '.join(long_term_artists)}")
+
+        # Process recent top tracks
+        if not isinstance(top_tracks_recent, BaseException) and top_tracks_recent:
+            recent_tracks = []
+            for track in top_tracks_recent[:8]:
+                if isinstance(track, dict):
+                    track_name = track.get("name")
+                    artists = track.get("artists", [])
+                    if track_name and isinstance(artists, list) and artists:
+                        artist_name = (
+                            artists[0].get("name") if isinstance(artists[0], dict) else None
+                        )
+                        if artist_name:
+                            recent_tracks.append(f"{artist_name} - {track_name}")
+            if recent_tracks:
+                preferences_parts.append(
+                    "Recently Loved Tracks:\n  " + "\n  ".join(recent_tracks[:6])
+                )
+
+        # Process recently played to understand current listening patterns
+        if not isinstance(recently_played, BaseException) and recently_played:
+            recent_artists = []
+            for item in recently_played[:15]:
+                if isinstance(item, dict):
+                    track = item.get("track", {})
+                    if isinstance(track, dict):
+                        artists = track.get("artists", [])
+                        if isinstance(artists, list) and artists:
+                            artist_name = (
+                                artists[0].get("name") if isinstance(artists[0], dict) else None
+                            )
+                            if artist_name and artist_name not in recent_artists:
+                                recent_artists.append(artist_name)
+            if recent_artists:
+                preferences_parts.append(
+                    f"Recently Played Artists: {', '.join(recent_artists[:8])}"
+                )
+
+        if preferences_parts:
+            result = "\n".join(preferences_parts)
+            logger.info("Successfully built user preferences context (%d chars)", len(result))
+            return result
+        else:
+            logger.warning("No preference data could be extracted for user %s", user_id)
+            return ""
+
+    except Exception as exc:
+        logger.warning("Failed to fetch user preferences: %s", exc, exc_info=True)
+        return ""
 
 
 async def _playlist_name(context: str, api_key: str | None) -> str:
@@ -39,7 +143,8 @@ async def _playlist_name(context: str, api_key: str | None) -> str:
         prompt = (
             f"Generate a short, catchy playlist name (max 30 characters) "
             f"based on this context: {context.strip()}\n\n"
-            f"Return ONLY the playlist name, nothing else. No quotes, no explanations, just the name."
+            f"Return ONLY the playlist name, nothing else. No quotes, no explanations, "
+            f"just the name."
         )
 
         response = await client.messages.create(
@@ -54,8 +159,8 @@ async def _playlist_name(context: str, api_key: str | None) -> str:
             text: str
             if hasattr(first_block, "text"):
                 text = first_block.text
-            elif isinstance(first_block, dict):
-                text = str(first_block.get("text", ""))
+            elif isinstance(first_block, dict):  # type: ignore[unreachable]
+                text = str(first_block.get("text", ""))  # type: ignore[unreachable]
             else:
                 text = str(first_block)
 
@@ -76,7 +181,7 @@ def _playlist_description(context: str) -> str:
     return f"Autogenerated via Claude for: {context.strip()[:200]}"
 
 
-def _find_best_uri(options: list[dict], track: PlannedTrack) -> str | None:
+def _find_best_uri(options: list[dict[str, Any]], track: PlannedTrack) -> str | None:
     """Find the best matching Spotify URI from search results."""
     if not options:
         return None
@@ -87,7 +192,7 @@ def _find_best_uri(options: list[dict], track: PlannedTrack) -> str | None:
     # First pass: exact title match with artist match
     for candidate in options:
         if not isinstance(candidate, dict):
-            continue
+            continue  # type: ignore[unreachable]
         uri = candidate.get("uri")
         name = str(candidate.get("name", "")).lower()
         artists = [
@@ -105,7 +210,7 @@ def _find_best_uri(options: list[dict], track: PlannedTrack) -> str | None:
     # Second pass: partial title match with artist match
     for candidate in options:
         if not isinstance(candidate, dict):
-            continue
+            continue  # type: ignore[unreachable]
         uri = candidate.get("uri")
         name = str(candidate.get("name", "")).lower()
         artists = [
@@ -133,15 +238,15 @@ def _find_best_uri(options: list[dict], track: PlannedTrack) -> str | None:
 
 def _summarize_tracks(tracks: list[PlannedTrack], limit: int = 10) -> str:
     lines = [
-        f"{idx + 1}. {track.title} — {track.artist}" for idx, track in enumerate(tracks[:limit])
+        f"{idx + 1}. {track.title} ? {track.artist}" for idx, track in enumerate(tracks[:limit])
     ]
     if len(tracks) > limit:
-        lines.append("…")
+        lines.append("?")
     return "\n".join(lines)
 
 
 async def _search_track_with_retry(
-    spotify,
+    spotify: SpotifyClient,
     user_id: int,
     planned: PlannedTrack,
     semaphore: asyncio.Semaphore,
@@ -166,13 +271,13 @@ async def _search_track_with_retry(
 
 
 async def _search_tracks_parallel(
-    spotify,
+    spotify: SpotifyClient,
     user_id: int,
     tracks: list[PlannedTrack],
     *,
     max_concurrent: int = 5,
     batch_size: int = 10,
-    status_message=None,
+    status_message: Message | None = None,
 ) -> tuple[list[tuple[PlannedTrack, str]], list[PlannedTrack]]:
     """Search for tracks in parallel with rate limiting and batching."""
     found_tracks: list[tuple[PlannedTrack, str]] = []
@@ -195,7 +300,7 @@ async def _search_tracks_parallel(
         if status_message is not None:
             try:
                 await status_message.edit_text(
-                    f"Cooking up a playlist… ({batch_end}/{len(tracks)} tracks)"
+                    f"Cooking up a playlist? ({batch_end}/{len(tracks)} tracks)"
                 )
             except Exception as exc:
                 logger.debug("Could not update progress message: %s", exc)
@@ -217,7 +322,10 @@ async def _search_tracks_parallel(
             if isinstance(result, Exception):
                 # If any search in the batch failed, propagate the error
                 raise result
-            planned, uri = result
+            if isinstance(result, tuple):
+                planned, uri = result
+            else:
+                continue
             if uri is None:
                 missing_tracks.append(planned)
             else:
@@ -316,18 +424,32 @@ async def handle_mix_command(message: Message) -> None:
         return
 
     try:
-        status = await message.answer("Cooking up a playlist…")
+        status = await message.answer("Cooking up a playlist?")
+
+        spotify = _get_spotify_client(message)
+
+        # Fetch user preferences to personalize the playlist
+        logger.info("Fetching user preferences for personalization")
+        try:
+            user_preferences = await _fetch_user_preferences(spotify, user_id)
+            if user_preferences:
+                logger.info(
+                    "User preferences fetched successfully, %d chars", len(user_preferences)
+                )
+            else:
+                logger.info("No user preferences available, will use request only")
+        except Exception as exc:
+            logger.warning("Failed to fetch user preferences, continuing without: %s", exc)
+            user_preferences = ""
 
         planner = ClaudePlaylistPlanner(api_key=settings.anthropic_api_key)
         try:
-            plan = await planner.plan(context=context)
+            plan = await planner.plan(context=context, user_preferences=user_preferences)
             logger.info("Successfully generated playlist plan with %d tracks", len(plan.tracks))
         except PlaylistPlannerError as exc:
             logger.error("Playlist planning failed for user %s: %s", user_id, exc, exc_info=True)
             await status.edit_text(f"Claude couldn't build a playlist: {exc}")
             return
-
-        spotify = _get_spotify_client(message)
 
         logger.info("Starting parallel Spotify search for %d tracks", len(plan.tracks))
         try:
@@ -397,7 +519,7 @@ async def handle_mix_command(message: Message) -> None:
 
         summary = _summarize_tracks([track for track, _ in found_tracks])
         message_lines = [
-            "✅ Playlist created!",
+            "? Playlist created!",
             f"Name: <b>{playlist_name}</b>",
         ]
         if playlist_url:
@@ -406,7 +528,7 @@ async def handle_mix_command(message: Message) -> None:
 
         if missing_tracks:
             missed_summary = ", ".join(
-                f"{track.title} — {track.artist}" for track in missing_tracks[:5]
+                f"{track.title} ? {track.artist}" for track in missing_tracks[:5]
             )
             message_lines.append(f"\nCouldn't find: {missed_summary}")
             logger.info(
