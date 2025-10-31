@@ -11,6 +11,11 @@ class PlaybackAction(CallbackData, prefix="player"):
     action: str
 
 
+class TransferConfirm(CallbackData, prefix="transfer"):
+    action: str  # play | pause | next | previous
+    confirm: str  # yes | no
+
+
 def build_auth_keyboard(login_url: str) -> InlineKeyboardMarkup:
     """Render a single button that links to the Spotify login flow."""
 
@@ -32,4 +37,26 @@ def build_playback_keyboard() -> InlineKeyboardMarkup:
     return builder.as_markup()
 
 
-__all__ = ["PlaybackAction", "build_auth_keyboard", "build_playback_keyboard"]
+def build_transfer_confirm_keyboard(action: str) -> InlineKeyboardMarkup:
+    """Ask the user to confirm transfer before executing action."""
+
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="✅ Transfer and continue",
+        callback_data=TransferConfirm(action=action, confirm="yes").pack(),
+    )
+    builder.button(
+        text="❌ Cancel",
+        callback_data=TransferConfirm(action=action, confirm="no").pack(),
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+__all__ = [
+    "PlaybackAction",
+    "TransferConfirm",
+    "build_auth_keyboard",
+    "build_playback_keyboard",
+    "build_transfer_confirm_keyboard",
+]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -157,10 +158,35 @@ class SpotifyClient:
             headers["Authorization"] = f"Bearer {tokens.access_token}"
             response = await self._http.request(method, path, headers=headers, **kwargs)
 
-        ok_status = expected_status or (200, 201, 202, 204)
-        if response.status_code not in ok_status:
+        # Treat any 2xx as success. Some Spotify endpoints may return 200
+        # even when docs claim 204, so be permissive here.
+        if not (200 <= response.status_code < 300):
+            # Try to parse error message for better user-facing errors
+            error_message = response.text
+            try:
+                error_json = response.json()
+                if isinstance(error_json, dict):
+                    error_obj = error_json.get("error", {})
+                    if isinstance(error_obj, dict):
+                        status_code = error_obj.get("status")
+                        message = error_obj.get("message", "")
+                        if message:
+                            if status_code == 403 and "Restricted device" in message:
+                                error_message = (
+                                    "Restricted device: This device cannot be controlled "
+                                    "via the API. Please use Spotify on your phone or "
+                                    "computer instead."
+                                )
+                            elif status_code == 403:
+                                error_message = f"Access forbidden: {message}"
+                            elif message:
+                                error_message = message
+            except (ValueError, TypeError, AttributeError):
+                # Failed to parse JSON, use raw text
+                pass
+
             raise SpotifyClientError(
-                f"Spotify request failed ({response.status_code}): {response.text}"
+                f"Spotify request failed ({response.status_code}): {error_message}"
             )
         return response
 
@@ -210,7 +236,9 @@ class SpotifyClient:
             expected_status=(204,),
         )
 
-    async def _ensure_controllable_device(self, user_id: int) -> str | None:
+    async def _ensure_controllable_device(
+        self, user_id: int, *, allow_transfer: bool
+    ) -> str | None:
         """
         Ensure playback is on a controllable device.
         Returns device_id if successful, None if no controllable device is available.
@@ -230,16 +258,70 @@ class SpotifyClient:
             # Player state unavailable, continue to check devices
             pass
 
-        # Current device is restricted or not available, find a controllable one
+        # Current device is restricted or not available
+        if not allow_transfer:
+            return None
+
+        # Find a controllable one and transfer if allowed
         try:
             devices = await self.get_devices(user_id)
+
+            # Prefer active devices first, then any controllable device
+            # Avoid Speaker type devices which might still be restricted
+            controllable_devices = []
+            active_controllable_devices = []
+
             for device in devices:
                 device_id = device.get("id")
                 is_restricted = device.get("is_restricted", False)
+                is_active = device.get("is_active", False)
+                device_type = device.get("type", "")
+
+                # Prefer Computer and Smartphone, avoid Speaker devices
                 if isinstance(device_id, str) and not is_restricted:
-                    # Transfer to this controllable device
+                    # Prefer Computer and Smartphone devices
+                    is_preferred = device_type in ("Computer", "Smartphone")
+                    device_tuple = (device_id, device, is_preferred)
+
+                    if is_active:
+                        active_controllable_devices.append(device_tuple)
+                    else:
+                        controllable_devices.append(device_tuple)
+
+            # Sort by preference (preferred devices first) within each group
+            def sort_key(item: tuple[str, dict[str, Any], bool]) -> tuple[bool, str]:
+                device_id, _, is_preferred = item
+                return (not is_preferred, device_id)  # False (preferred) comes before True
+
+            active_controllable_devices.sort(key=sort_key)
+            controllable_devices.sort(key=sort_key)
+
+            # Try active devices first (if any)
+            device_list = active_controllable_devices + controllable_devices
+
+            for device_id, _, _ in device_list:
+                # Transfer to this controllable device
+                try:
                     await self.transfer_playback(user_id, device_id=device_id, play=False)
+                    # Give Spotify a moment to complete the transfer
+                    await asyncio.sleep(0.5)
+
+                    # Verify the transfer worked
+                    player_state = await self.get_player(user_id)
+                    if player_state:
+                        active_device = player_state.get("device", {})
+                        if isinstance(active_device, dict):
+                            active_device_id = active_device.get("id")
+                            if active_device_id == device_id:
+                                # Transfer successful
+                                return device_id
+
+                    # If we can't verify, still return the device_id and let it try
                     return device_id
+                except SpotifyClientError:
+                    # Transfer failed, try next device
+                    continue
+
         except SpotifyClientError:
             # Could not get devices, return None
             pass
@@ -252,16 +334,20 @@ class SpotifyClient:
         user_id: int,
         *,
         device_id: str | None = None,
+        allow_transfer: bool = False,
         uris: Sequence[str] | None = None,
         context_uri: str | None = None,
     ) -> None:
         # If no device_id specified, ensure we're on a controllable device
         if device_id is None:
-            device_id = await self._ensure_controllable_device(user_id)
+            device_id = await self._ensure_controllable_device(
+                user_id, allow_transfer=allow_transfer
+            )
             if device_id is None:
                 raise SpotifyClientError(
-                    "No controllable device available. Please start Spotify on a device "
-                    "that supports Web API control (not Sonos or other restricted devices)."
+                    "No controllable device available. Please start Spotify on a "
+                    "device that supports Web API control (not Sonos or other "
+                    "restricted devices)."
                 )
 
         payload: dict[str, Any] = {}
@@ -279,14 +365,19 @@ class SpotifyClient:
             expected_status=(204,),
         )
 
-    async def pause(self, user_id: int, *, device_id: str | None = None) -> None:
+    async def pause(
+        self, user_id: int, *, device_id: str | None = None, allow_transfer: bool = False
+    ) -> None:
         # If no device_id specified, ensure we're on a controllable device
         if device_id is None:
-            device_id = await self._ensure_controllable_device(user_id)
+            device_id = await self._ensure_controllable_device(
+                user_id, allow_transfer=allow_transfer
+            )
             if device_id is None:
                 raise SpotifyClientError(
-                    "No controllable device available. Please start Spotify on a device "
-                    "that supports Web API control (not Sonos or other restricted devices)."
+                    "No controllable device available. Please start Spotify on a "
+                    "device that supports Web API control (not Sonos or other "
+                    "restricted devices)."
                 )
 
         params = {"device_id": device_id} if device_id else None
@@ -298,14 +389,19 @@ class SpotifyClient:
             expected_status=(204,),
         )
 
-    async def next_track(self, user_id: int, *, device_id: str | None = None) -> None:
+    async def next_track(
+        self, user_id: int, *, device_id: str | None = None, allow_transfer: bool = False
+    ) -> None:
         # If no device_id specified, ensure we're on a controllable device
         if device_id is None:
-            device_id = await self._ensure_controllable_device(user_id)
+            device_id = await self._ensure_controllable_device(
+                user_id, allow_transfer=allow_transfer
+            )
             if device_id is None:
                 raise SpotifyClientError(
-                    "No controllable device available. Please start Spotify on a device "
-                    "that supports Web API control (not Sonos or other restricted devices)."
+                    "No controllable device available. Please start Spotify on a "
+                    "device that supports Web API control (not Sonos or other "
+                    "restricted devices)."
                 )
 
         params = {"device_id": device_id} if device_id else None
@@ -317,14 +413,19 @@ class SpotifyClient:
             expected_status=(204,),
         )
 
-    async def previous_track(self, user_id: int, *, device_id: str | None = None) -> None:
+    async def previous_track(
+        self, user_id: int, *, device_id: str | None = None, allow_transfer: bool = False
+    ) -> None:
         # If no device_id specified, ensure we're on a controllable device
         if device_id is None:
-            device_id = await self._ensure_controllable_device(user_id)
+            device_id = await self._ensure_controllable_device(
+                user_id, allow_transfer=allow_transfer
+            )
             if device_id is None:
                 raise SpotifyClientError(
-                    "No controllable device available. Please start Spotify on a device "
-                    "that supports Web API control (not Sonos or other restricted devices)."
+                    "No controllable device available. Please start Spotify on a "
+                    "device that supports Web API control (not Sonos or other "
+                    "restricted devices)."
                 )
 
         params = {"device_id": device_id} if device_id else None

@@ -13,7 +13,12 @@ from .commands import (
     _load_tokens_by_telegram_id,
     _send_link_prompt_for_user,
 )
-from .keyboards import PlaybackAction, build_playback_keyboard
+from .keyboards import (
+    PlaybackAction,
+    TransferConfirm,
+    build_playback_keyboard,
+    build_transfer_confirm_keyboard,
+)
 
 router = Router(name="playback")
 
@@ -54,18 +59,27 @@ async def handle_playback_callback(callback: CallbackQuery, callback_data: Playb
 
     try:
         if action == "play":
-            await spotify.play(user.id)
+            await spotify.play(user.id, allow_transfer=False)
         elif action == "pause":
-            await spotify.pause(user.id)
+            await spotify.pause(user.id, allow_transfer=False)
         elif action == "next":
-            await spotify.next_track(user.id)
+            await spotify.next_track(user.id, allow_transfer=False)
         elif action == "previous":
-            await spotify.previous_track(user.id)
+            await spotify.previous_track(user.id, allow_transfer=False)
         else:
             # Unknown action, already answered callback
             return
     except SpotifyClientError as exc:
-        await message.answer(f"Spotify request failed: {exc}")
+        error_msg = str(exc)
+        # Extract user-friendly message if available
+        if "Restricted device" in error_msg or "No controllable device available" in error_msg:
+            await message.answer(
+                "This device can't be controlled. Transfer playback to a controllable "
+                "device (phone/computer) to continue?",
+                reply_markup=build_transfer_confirm_keyboard(action),
+            )
+        else:
+            await message.answer(f"❌ Spotify error: {error_msg}")
         return
 
     playback = None
@@ -73,6 +87,58 @@ async def handle_playback_callback(callback: CallbackQuery, callback_data: Playb
         playback = await spotify.get_currently_playing(user.id)
     except SpotifyClientError as exc:
         await message.answer(f"Unable to fetch now playing: {exc}")
+
+    if playback:
+        await message.answer(
+            _format_track(playback),
+            reply_markup=build_playback_keyboard(),
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer(
+            "No track information available.",
+            reply_markup=build_playback_keyboard(),
+        )
+
+
+@router.callback_query(TransferConfirm.filter())
+async def handle_transfer_confirm(callback: CallbackQuery, callback_data: TransferConfirm) -> None:
+    message = callback.message
+    user = callback.from_user
+    await callback.answer()
+
+    if message is None or user is None:
+        return
+
+    spotify = _get_spotify_client(message)
+    action = callback_data.action
+    confirm = callback_data.confirm
+
+    if confirm != "yes":
+        await message.answer("Okay, cancelled.")
+        return
+
+    try:
+        if action == "play":
+            await spotify.play(user.id, allow_transfer=True)
+        elif action == "pause":
+            await spotify.pause(user.id, allow_transfer=True)
+        elif action == "next":
+            await spotify.next_track(user.id, allow_transfer=True)
+        elif action == "previous":
+            await spotify.previous_track(user.id, allow_transfer=True)
+        else:
+            return
+    except SpotifyClientError as exc:
+        await message.answer(f"❌ Spotify error after transfer: {exc}")
+        return
+
+    # Show updated now playing
+    try:
+        playback = await spotify.get_currently_playing(user.id)
+    except SpotifyClientError as exc:
+        await message.answer(f"Unable to fetch now playing: {exc}")
+        return
 
     if playback:
         await message.answer(
