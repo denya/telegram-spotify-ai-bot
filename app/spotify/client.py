@@ -161,15 +161,29 @@ class SpotifyClient:
         expected_status: Sequence[int] | None = None,
         **kwargs: Any,
     ) -> httpx.Response:
-        tokens = await self._ensure_fresh_tokens(user_id)
+        try:
+            tokens = await self._ensure_fresh_tokens(user_id)
+        except SpotifyClientError:
+            # If token refresh fails (e.g., revoked), re-raise immediately
+            # Don't try to use potentially stale tokens
+            raise
         headers = kwargs.pop("headers", {})
         headers.setdefault("Authorization", f"Bearer {tokens.access_token}")
         response = await self._http.request(method, path, headers=headers, **kwargs)
 
         if response.status_code == 401 and retry:
-            tokens = await self._refresh_tokens(user_id, tokens)
-            headers["Authorization"] = f"Bearer {tokens.access_token}"
-            response = await self._http.request(method, path, headers=headers, **kwargs)
+            try:
+                # Clear cache before retry to force reload of fresh tokens
+                self._cache.pop(user_id, None)
+                # Reload tokens from DB (might have been updated elsewhere)
+                fresh_tokens = await self._get_tokens(user_id)
+                tokens = await self._refresh_tokens(user_id, fresh_tokens)
+                headers["Authorization"] = f"Bearer {tokens.access_token}"
+                response = await self._http.request(method, path, headers=headers, **kwargs)
+            except SpotifyClientError:
+                # If refresh fails (e.g., revoked token), propagate the error
+                # Tokens have already been cleared in _refresh_tokens
+                raise
 
         # Treat any 2xx as success. Some Spotify endpoints may return 200
         # even when docs claim 204, so be permissive here.
