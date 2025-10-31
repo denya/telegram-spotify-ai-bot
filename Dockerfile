@@ -4,12 +4,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_NO_CACHE_DIR=1 \
     DB_PATH=/data/app.db \
-    RUN_MODE=combined
+    RUN_MODE=combined \
+    PYO3_USE_ABI3_FORWARD_COMPATIBILITY=1
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
     ca-certificates \
+    curl \
   && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt ./
