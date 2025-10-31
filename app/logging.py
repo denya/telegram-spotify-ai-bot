@@ -5,7 +5,6 @@ from __future__ import annotations
 import logging
 from typing import Final
 
-
 _DEFAULT_LEVEL: Final[int] = logging.INFO
 _DEFAULT_FORMAT: Final[str] = "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
 _DEFAULT_DATEFMT: Final[str] = "%Y-%m-%d %H:%M:%S"

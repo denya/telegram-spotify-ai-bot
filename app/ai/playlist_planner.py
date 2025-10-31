@@ -94,7 +94,9 @@ def _parse_tracks(raw: str) -> PlaylistPlan:
         raise PlaylistPlannerError("Could not parse any tracks from Claude response")
 
     if len(planned) < MAX_TRACKS:
-        logger.warning("Only parsed %d tracks, expected %d", len(planned), MAX_TRACKS)
+        raise PlaylistPlannerError(
+            f"Claude returned fewer tracks than requested: {len(planned)} < {MAX_TRACKS}"
+        )
 
     return PlaylistPlan(tracks=planned)
 

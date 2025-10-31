@@ -1,8 +1,6 @@
-"""Unit tests for the playlist planner JSON parsing helpers."""
+"""Unit tests for the playlist planner plain text parsing helpers."""
 
 from __future__ import annotations
-
-import json
 
 import pytest
 
@@ -10,16 +8,9 @@ from app.ai.playlist_planner import MAX_TRACKS, PlannedTrack, PlaylistPlannerErr
 
 
 def _build_payload(count: int = MAX_TRACKS) -> str:
-    data = {
-        "tracks": [
-            {
-                "title": f"Song {index}",
-                "artist": f"Artist {index}",
-            }
-            for index in range(count)
-        ]
-    }
-    return json.dumps(data)
+    """Build plain text payload in 'artist - song' format."""
+    lines = [f"Artist {index} - Song {index}" for index in range(count)]
+    return "\n".join(lines)
 
 
 def test_parse_tracks_success() -> None:
@@ -37,6 +28,7 @@ def test_parse_tracks_rejects_short_responses() -> None:
         _parse_tracks(raw)
 
 
-def test_parse_tracks_rejects_invalid_json() -> None:
+def test_parse_tracks_rejects_invalid_format() -> None:
+    """Test that invalid plain text format raises an error."""
     with pytest.raises(PlaylistPlannerError):
-        _parse_tracks("not-json")
+        _parse_tracks("not a valid track format")

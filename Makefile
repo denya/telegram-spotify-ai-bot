@@ -17,7 +17,7 @@ ifeq ($(strip $(PYTHON)),)
 $(error Could not determine a Python interpreter. Install Python or configure pyenv.)
 endif
 
-.PHONY: install run fmt format lint test python-info pyenv-bootstrap run-bot run-web dev
+.PHONY: install run run-combined fmt format lint test python-info pyenv-bootstrap run-bot run-web dev
 
 python-info:
 	@printf "Python command: %s\n" "$(PYTHON)"
@@ -54,6 +54,9 @@ install:
 
 run:
 	$(PYTHON) -m app.main
+
+run-combined:
+	$(PYTHON) -m app.main --combined
 
 run-bot:
 	$(PYTHON) -m app.main
