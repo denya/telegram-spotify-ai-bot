@@ -71,6 +71,57 @@ async def _load_tokens(message: Message) -> repository.SpotifyTokens | None:
     )
 
 
+async def _load_tokens_by_telegram_id(
+    message: Message, telegram_id: int
+) -> repository.SpotifyTokens | None:
+    """Load tokens by Telegram user ID, given a message object."""
+    token_store = _get_token_store(message)
+    return await token_store.load_by_telegram_id(telegram_id)
+
+
+def _build_login_url_for_user(
+    settings: Settings,
+    telegram_id: int,
+    username: str = "",
+    first_name: str = "",
+    last_name: str = "",
+) -> str:
+    """Build login URL for a specific user without requiring a Message object."""
+    params = {
+        "telegram_id": telegram_id,
+        "username": username,
+        "first_name": first_name,
+        "last_name": last_name,
+    }
+    query = urlencode(params)
+    return f"{settings.web_base_url}/spotify/login?{query}"
+
+
+async def _send_link_prompt_for_user(
+    message: Message,
+    settings: Settings,
+    telegram_id: int,
+    username: str = "",
+    first_name: str = "",
+    last_name: str = "",
+) -> None:
+    """Send login prompt for a specific user without requiring message.from_user."""
+    login_url = _build_login_url_for_user(settings, telegram_id, username, first_name, last_name)
+    is_localhost = "localhost" in login_url or "127.0.0.1" in login_url
+
+    text = (
+        "🎵 <b>Welcome to Spotify AI Bot!</b>\n\n"
+        "To get started, let's connect your Spotify account.\n"
+        "Click the link below to authorize:\n\n"
+        f"<a href='{login_url}'>🔗 Connect Spotify Account</a>"
+    )
+
+    if is_localhost:
+        text += f"\n\n<b>Localhost URL:</b>\n<code>{login_url}</code>"
+
+    await message.answer(text, parse_mode="HTML")
+
+
 async def _send_link_prompt(message: Message, settings: Settings) -> None:
     login_url = _build_login_url(settings, message)
     is_localhost = "localhost" in login_url or "127.0.0.1" in login_url

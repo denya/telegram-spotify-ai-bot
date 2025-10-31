@@ -10,8 +10,8 @@ from .commands import (
     _format_track,
     _get_settings,
     _get_spotify_client,
-    _load_tokens,
-    _send_link_prompt,
+    _load_tokens_by_telegram_id,
+    _send_link_prompt_for_user,
 )
 from .keyboards import PlaybackAction, build_playback_keyboard
 
@@ -36,10 +36,17 @@ async def handle_playback_callback(callback: CallbackQuery, callback_data: Playb
         return
 
     settings = _get_settings(message)
-    tokens = await _load_tokens(message)
+    tokens = await _load_tokens_by_telegram_id(message, user.id)
 
     if tokens is None:
-        await _send_link_prompt(message, settings)
+        await _send_link_prompt_for_user(
+            message,
+            settings,
+            user.id,
+            user.username or "",
+            user.first_name or "",
+            user.last_name or "",
+        )
         return
 
     spotify = _get_spotify_client(message)
@@ -55,7 +62,7 @@ async def handle_playback_callback(callback: CallbackQuery, callback_data: Playb
         elif action == "previous":
             await spotify.previous_track(user.id)
         else:
-            await callback.answer("Unsupported action", show_alert=False)
+            # Unknown action, already answered callback
             return
     except SpotifyClientError as exc:
         await message.answer(f"Spotify request failed: {exc}")
@@ -78,9 +85,6 @@ async def handle_playback_callback(callback: CallbackQuery, callback_data: Playb
             "No track information available.",
             reply_markup=build_playback_keyboard(),
         )
-
-    if action in _ACTION_TEXT:
-        await callback.answer(_ACTION_TEXT[action], show_alert=False)
 
 
 __all__ = ["handle_playback_callback", "router"]

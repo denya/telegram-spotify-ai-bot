@@ -179,6 +179,74 @@ class SpotifyClient:
             return None
         return response.json()
 
+    async def get_player(self, user_id: int) -> dict[str, Any] | None:
+        """Get information about the user's current playback state."""
+        response = await self._request(
+            user_id,
+            "GET",
+            "/me/player",
+            expected_status=(200, 204),
+        )
+        if response.status_code == 204 or not response.content:
+            return None
+        return response.json()
+
+    async def get_devices(self, user_id: int) -> list[dict[str, Any]]:
+        """Get the list of devices available for the user."""
+        response = await self._request(user_id, "GET", "/me/player/devices")
+        payload = response.json()
+        devices = payload.get("devices")
+        if not isinstance(devices, list):
+            return []
+        return devices
+
+    async def transfer_playback(self, user_id: int, *, device_id: str, play: bool = False) -> None:
+        """Transfer playback to a specific device."""
+        await self._request(
+            user_id,
+            "PUT",
+            "/me/player",
+            json={"device_ids": [device_id], "play": play},
+            expected_status=(204,),
+        )
+
+    async def _ensure_controllable_device(self, user_id: int) -> str | None:
+        """
+        Ensure playback is on a controllable device.
+        Returns device_id if successful, None if no controllable device is available.
+        """
+        try:
+            # First, check current player state
+            player_state = await self.get_player(user_id)
+            if player_state:
+                device = player_state.get("device")
+                if isinstance(device, dict):
+                    device_id = device.get("id")
+                    is_restricted = device.get("is_restricted", False)
+                    if isinstance(device_id, str) and not is_restricted:
+                        # Current device is not restricted, we're good
+                        return device_id
+        except SpotifyClientError:
+            # Player state unavailable, continue to check devices
+            pass
+
+        # Current device is restricted or not available, find a controllable one
+        try:
+            devices = await self.get_devices(user_id)
+            for device in devices:
+                device_id = device.get("id")
+                is_restricted = device.get("is_restricted", False)
+                if isinstance(device_id, str) and not is_restricted:
+                    # Transfer to this controllable device
+                    await self.transfer_playback(user_id, device_id=device_id, play=False)
+                    return device_id
+        except SpotifyClientError:
+            # Could not get devices, return None
+            pass
+
+        # No controllable devices found
+        return None
+
     async def play(
         self,
         user_id: int,
@@ -187,6 +255,15 @@ class SpotifyClient:
         uris: Sequence[str] | None = None,
         context_uri: str | None = None,
     ) -> None:
+        # If no device_id specified, ensure we're on a controllable device
+        if device_id is None:
+            device_id = await self._ensure_controllable_device(user_id)
+            if device_id is None:
+                raise SpotifyClientError(
+                    "No controllable device available. Please start Spotify on a device "
+                    "that supports Web API control (not Sonos or other restricted devices)."
+                )
+
         payload: dict[str, Any] = {}
         if uris:
             payload["uris"] = list(uris)
@@ -203,6 +280,15 @@ class SpotifyClient:
         )
 
     async def pause(self, user_id: int, *, device_id: str | None = None) -> None:
+        # If no device_id specified, ensure we're on a controllable device
+        if device_id is None:
+            device_id = await self._ensure_controllable_device(user_id)
+            if device_id is None:
+                raise SpotifyClientError(
+                    "No controllable device available. Please start Spotify on a device "
+                    "that supports Web API control (not Sonos or other restricted devices)."
+                )
+
         params = {"device_id": device_id} if device_id else None
         await self._request(
             user_id,
@@ -213,6 +299,15 @@ class SpotifyClient:
         )
 
     async def next_track(self, user_id: int, *, device_id: str | None = None) -> None:
+        # If no device_id specified, ensure we're on a controllable device
+        if device_id is None:
+            device_id = await self._ensure_controllable_device(user_id)
+            if device_id is None:
+                raise SpotifyClientError(
+                    "No controllable device available. Please start Spotify on a device "
+                    "that supports Web API control (not Sonos or other restricted devices)."
+                )
+
         params = {"device_id": device_id} if device_id else None
         await self._request(
             user_id,
@@ -223,6 +318,15 @@ class SpotifyClient:
         )
 
     async def previous_track(self, user_id: int, *, device_id: str | None = None) -> None:
+        # If no device_id specified, ensure we're on a controllable device
+        if device_id is None:
+            device_id = await self._ensure_controllable_device(user_id)
+            if device_id is None:
+                raise SpotifyClientError(
+                    "No controllable device available. Please start Spotify on a device "
+                    "that supports Web API control (not Sonos or other restricted devices)."
+                )
+
         params = {"device_id": device_id} if device_id else None
         await self._request(
             user_id,

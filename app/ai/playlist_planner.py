@@ -11,7 +11,7 @@ from anthropic import AsyncAnthropic
 
 from .claude_client import ClaudeConfigurationError, get_client
 
-MODEL_NAME = "claude-3-5-sonnet-latest"
+MODEL_NAME = "claude-3-5-haiku-20241022"
 MAX_TRACKS = 25
 MAX_OUTPUT_TOKENS = 2048
 TEMPERATURE = 0.6
@@ -25,7 +25,7 @@ SYSTEM_PROMPT = (
 
 USER_PROMPT_TEMPLATE = (
     "Using the following context, suggest exactly 25 songs that fit the vibe. "
-    'Return ONLY strict JSON with the shape: {"tracks": [{"title": str, "artist": str} * 25]}. '
+    'Return ONLY strict JSON with the shape: {{"tracks": [{{"title": str, "artist": str}} * 25]}}. '
     "Do not add explanations, comments, markdown, or keys besides 'tracks'.\n\n"
     "Context: {context}"
 )
@@ -99,7 +99,7 @@ class ClaudePlaylistPlanner:
 
         response = await self._client.messages.create(
             model=MODEL_NAME,
-            max_output_tokens=MAX_OUTPUT_TOKENS,
+            max_tokens=MAX_OUTPUT_TOKENS,
             temperature=TEMPERATURE,
             system=SYSTEM_PROMPT,
             messages=[
