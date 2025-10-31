@@ -33,7 +33,7 @@ async def _playlist_name(context: str, api_key: str | None) -> str:
         trimmed = context.strip()
         base = trimmed[:30].strip() or "Custom Mix"
         return base
-    
+
     try:
         client = AsyncAnthropic(api_key=api_key)
         prompt = (
@@ -41,14 +41,14 @@ async def _playlist_name(context: str, api_key: str | None) -> str:
             f"based on this context: {context.strip()}\n\n"
             f"Return ONLY the playlist name, nothing else. No quotes, no explanations, just the name."
         )
-        
+
         response = await client.messages.create(
             model="claude-3-5-haiku-20241022",
             max_tokens=50,
             temperature=0.7,
             messages=[{"role": "user", "content": prompt}],
         )
-        
+
         if response.content:
             first_block = response.content[0]
             text: str
@@ -58,14 +58,14 @@ async def _playlist_name(context: str, api_key: str | None) -> str:
                 text = str(first_block.get("text", ""))
             else:
                 text = str(first_block)
-            
+
             name = text.strip().strip('"').strip("'").strip()
             # Limit to 30 characters and clean up
             if name and len(name) <= 30:
                 return name
     except Exception as exc:
         logger.warning("Failed to generate playlist name with Claude: %s", exc)
-    
+
     # Fallback to simple name
     trimmed = context.strip()
     base = trimmed[:30].strip() or "Custom Mix"
