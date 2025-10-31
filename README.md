@@ -44,8 +44,7 @@ Minimal Telegram assistant that wires up Spotify playback control and Claude-pow
    - `TELEGRAM_BOT_TOKEN`
    - `SPOTIFY_CLIENT_ID`
    - `SPOTIFY_CLIENT_SECRET` (omit if PKCE-only)
-   - `SPOTIFY_REDIRECT_URI` (e.g. `https://<domain>/spotify/callback`)
-   - `WEB_BASE_URL` (e.g. `https://<domain>`)
+   - `SPOTIFY_REDIRECT_URI` (e.g. `https://<domain>/spotify/callback`) - base URL is automatically derived from this
    - Optional: `ANTHROPIC_API_KEY`, `SPOTIFY_PKCE_ENABLED`, `ANTHROPIC_WEB_SEARCH_ENABLED`, `ANTHROPIC_WEB_SEARCH_MAX_USES`, `ENCRYPTION_KEY`
 5. The image runs both FastAPI and the Telegram bot via `RUN_MODE=combined`; override `PORT` or `WEB_HOST` if Coolify uses custom networking.
 

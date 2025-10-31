@@ -78,11 +78,11 @@ async def run_bot() -> None:
     setup_logging()
     logger.info("Initializing Telegram bot polling")
     settings = load_settings()
-    logger.info(
-        "Loaded settings (mode=%s, web_base_url=%s)",
-        settings.telegram_mode,
-        settings.web_base_url,
-    )
+    logger.info("Configuration loaded:")
+    logger.info("  Telegram mode: %s", settings.telegram_mode)
+    logger.info("  Web base URL: %s", settings.web_base_url)
+    logger.info("  Spotify redirect URI: %s", settings.spotify_redirect_uri)
+    logger.info("  Login URL: %s/spotify/login", settings.web_base_url)
     await schema.ensure_schema(settings.db_path)
     bot, dispatcher, spotify_client, _ = _configure_bot(settings)
 
@@ -105,11 +105,11 @@ async def run_combined(
     setup_logging()
     logger.info("Starting combined mode (web + bot) on %s:%s", host, port)
     settings = load_settings()
-    logger.info(
-        "Loaded settings (mode=%s, web_base_url=%s)",
-        settings.telegram_mode,
-        settings.web_base_url,
-    )
+    logger.info("Configuration loaded:")
+    logger.info("  Telegram mode: %s", settings.telegram_mode)
+    logger.info("  Web base URL: %s", settings.web_base_url)
+    logger.info("  Spotify redirect URI: %s", settings.spotify_redirect_uri)
+    logger.info("  Login URL: %s/spotify/login", settings.web_base_url)
     await schema.ensure_schema(settings.db_path)
     bot, dispatcher, spotify_client, _ = _configure_bot(settings)
 

@@ -3,15 +3,19 @@
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from typing import Any, Annotated
 
 import aiosqlite
+from aiogram import Bot
+from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from ..config import SPOTIFY_SCOPES, Settings, load_settings
 from ..db import repository, schema
 from ..spotify import auth as spotify_auth
+from ..spotify.client import RepositoryTokenStore, SpotifyClient, SpotifyClientError
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/spotify", tags=["spotify"])
@@ -92,6 +96,7 @@ async def authorization_callback(
     if code is None or state is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing code or state")
 
+    telegram_id: int | None = None
     async with repository.connect(settings.db_path) as connection:
         await schema.apply_schema(connection)
         auth_state = await repository.fetch_auth_state(connection, state)
@@ -130,14 +135,94 @@ async def authorization_callback(
             token_type=token_response.token_type,
             expires_at=expires_at,
         )
+        # Get telegram_id for sending notification
+        telegram_id = await repository.get_telegram_id_by_user_id(
+            connection, auth_state.user_id
+        )
         await repository.delete_auth_state(connection, state)
         await connection.commit()
+
+    # Send Telegram notification after successful authorization
+    if telegram_id is not None:
+        try:
+            bot = Bot(
+                token=settings.telegram_bot_token,
+                default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+            )
+            token_store = RepositoryTokenStore(settings.db_path)
+            spotify_client = SpotifyClient(settings=settings, token_store=token_store)
+
+            # Send connection success message
+            await bot.send_message(
+                telegram_id,
+                "✅ <b>Spotify connected!</b>\n\n"
+                "Your Spotify account has been successfully linked. "
+                "You can now control your music!",
+            )
+
+            # Get and send currently playing track
+            try:
+                playback = await spotify_client.get_currently_playing(telegram_id)
+                if playback:
+                    track_message = _format_track(playback)
+                    await bot.send_message(
+                        telegram_id,
+                        f"🎵 <b>What's playing now:</b>\n\n{track_message}",
+                        disable_web_page_preview=False,
+                    )
+                else:
+                    await bot.send_message(
+                        telegram_id,
+                        "🎵 Nothing is playing right now. "
+                        "Start some music on Spotify to control it here!",
+                    )
+            except SpotifyClientError as exc:
+                logger.warning(
+                    "Failed to get currently playing track for user %s: %s", telegram_id, exc
+                )
+            except Exception as exc:
+                logger.warning(
+                    "Error getting currently playing track for user %s: %s", telegram_id, exc
+                )
+
+            await spotify_client.aclose()
+            await bot.session.close()
+        except Exception as exc:
+            logger.error("Failed to send Telegram notification: %s", exc)
 
     html = (
         "<html><body><h1>All set!</h1><p>You can close this tab and return to Telegram.</p>"
         "</body></html>"
     )
     return HTMLResponse(content=html)
+
+
+def _format_track(payload: dict[str, Any]) -> str:
+    """Format currently playing track information."""
+    item = payload.get("item")
+    if not isinstance(item, dict):
+        return "Nothing is playing right now."
+    name = item.get("name") or "Unknown title"
+    artists = ", ".join(
+        artist.get("name", "?") for artist in item.get("artists", []) if isinstance(artist, dict)
+    )
+    album = (item.get("album") or {}).get("name") if isinstance(item.get("album"), dict) else None
+    external = item.get("external_urls") if isinstance(item.get("external_urls"), dict) else {}
+    url = external.get("spotify")
+    device = payload.get("device") if isinstance(payload.get("device"), dict) else None
+    device_name = device.get("name") if isinstance(device, dict) else None
+
+    bits = [f"🎧 <b>{name}</b>"]
+    if artists:
+        bits.append(f"by {artists}")
+    if album:
+        bits.append(f"on {album}")
+    if device_name:
+        bits.append(f"▶️ {device_name}")
+    text = "\n".join(bits)
+    if url:
+        text += f"\n<a href='{url}'>Open in Spotify</a>"
+    return text
 
 
 __all__ = ["authorization_callback", "router", "start_authorization"]
