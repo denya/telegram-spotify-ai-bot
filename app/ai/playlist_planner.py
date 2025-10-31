@@ -194,8 +194,8 @@ class ClaudePlaylistPlanner:
         # Extract text from TextBlock object properly
         if hasattr(first_block, "text"):
             text = first_block.text
-        elif isinstance(first_block, dict):
-            text = str(first_block.get("text", ""))
+        elif isinstance(first_block, dict):  # type: ignore[unreachable]
+            text = str(first_block.get("text", ""))  # type: ignore[unreachable]
         else:
             text = str(first_block)
 
