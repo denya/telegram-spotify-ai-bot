@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from app.db import repository, schema
 
 
 @pytest.mark.asyncio
-async def test_auth_state_crud(tmp_path) -> None:
+async def test_auth_state_crud(tmp_path: Path) -> None:
     db_path = tmp_path / "app.db"
     await schema.ensure_schema(db_path)
 

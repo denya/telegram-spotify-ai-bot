@@ -132,7 +132,7 @@ def _parse_token_payload(payload: dict[str, object]) -> TokenResponse:
         scope = str(payload.get("scope", ""))
         expires_in_raw = payload.get("expires_in", 0)
         # Cast to int - we expect an int from Spotify API
-        expires_in = int(expires_in_raw) if isinstance(expires_in_raw, (int, str)) else 0
+        expires_in = int(expires_in_raw) if isinstance(expires_in_raw, int | str) else 0
         refresh_raw = payload.get("refresh_token")
         refresh_token = str(refresh_raw) if refresh_raw is not None else None
     except (KeyError, TypeError, ValueError) as exc:  # pragma: no cover - defensive
