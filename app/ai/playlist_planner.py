@@ -147,9 +147,7 @@ class ClaudePlaylistPlanner:
                 raise ClaudeConfigurationError("Provide either a client or an API key, not both.")
             self._client = client
 
-    async def plan(
-        self, *, context: str, user_preferences: str | None = None
-    ) -> PlaylistPlan:
+    async def plan(self, *, context: str, user_preferences: str | None = None) -> PlaylistPlan:
         if not context.strip():
             raise PlaylistPlannerError("Context prompt must not be empty")
 

@@ -28,21 +28,24 @@ router = Router(name="playlists")
 async def _fetch_user_preferences(spotify, user_id: int) -> str:
     """Fetch and format user's Spotify preferences for the AI prompt."""
     logger.info("Fetching user preferences for user %s", user_id)
-    
+
     preferences_parts = []
-    
+
     try:
         # Fetch multiple time ranges in parallel for a comprehensive view
-        top_artists_medium, top_artists_long, top_tracks_recent, recently_played = (
-            await asyncio.gather(
-                spotify.get_top_artists(user_id, time_range="medium_term", limit=15),
-                spotify.get_top_artists(user_id, time_range="long_term", limit=10),
-                spotify.get_top_tracks(user_id, time_range="short_term", limit=10),
-                spotify.get_recently_played(user_id, limit=20),
-                return_exceptions=True,
-            )
+        (
+            top_artists_medium,
+            top_artists_long,
+            top_tracks_recent,
+            recently_played,
+        ) = await asyncio.gather(
+            spotify.get_top_artists(user_id, time_range="medium_term", limit=15),
+            spotify.get_top_artists(user_id, time_range="long_term", limit=10),
+            spotify.get_top_tracks(user_id, time_range="short_term", limit=10),
+            spotify.get_recently_played(user_id, limit=20),
+            return_exceptions=True,
         )
-        
+
         # Process top artists (medium term - last 6 months)
         if not isinstance(top_artists_medium, Exception) and top_artists_medium:
             artist_names = []
@@ -55,7 +58,7 @@ async def _fetch_user_preferences(spotify, user_id: int) -> str:
                     artist_genres = artist.get("genres", [])
                     if isinstance(artist_genres, list):
                         genres.update(artist_genres[:3])  # Top 3 genres per artist
-            
+
             if artist_names:
                 preferences_parts.append(
                     f"Favorite Artists (last 6 months): {', '.join(artist_names[:10])}"
@@ -64,7 +67,7 @@ async def _fetch_user_preferences(spotify, user_id: int) -> str:
                 # Limit to most relevant genres
                 genre_list = sorted(list(genres))[:12]
                 preferences_parts.append(f"Preferred Genres: {', '.join(genre_list)}")
-        
+
         # Process long-term favorites for deeper understanding
         if not isinstance(top_artists_long, Exception) and top_artists_long:
             long_term_artists = []
@@ -74,10 +77,8 @@ async def _fetch_user_preferences(spotify, user_id: int) -> str:
                     if name:
                         long_term_artists.append(name)
             if long_term_artists:
-                preferences_parts.append(
-                    f"All-Time Favorites: {', '.join(long_term_artists)}"
-                )
-        
+                preferences_parts.append(f"All-Time Favorites: {', '.join(long_term_artists)}")
+
         # Process recent top tracks
         if not isinstance(top_tracks_recent, Exception) and top_tracks_recent:
             recent_tracks = []
@@ -95,7 +96,7 @@ async def _fetch_user_preferences(spotify, user_id: int) -> str:
                 preferences_parts.append(
                     "Recently Loved Tracks:\n  " + "\n  ".join(recent_tracks[:6])
                 )
-        
+
         # Process recently played to understand current listening patterns
         if not isinstance(recently_played, Exception) and recently_played:
             recent_artists = []
@@ -114,7 +115,7 @@ async def _fetch_user_preferences(spotify, user_id: int) -> str:
                 preferences_parts.append(
                     f"Recently Played Artists: {', '.join(recent_artists[:8])}"
                 )
-        
+
         if preferences_parts:
             result = "\n".join(preferences_parts)
             logger.info("Successfully built user preferences context (%d chars)", len(result))
@@ -122,7 +123,7 @@ async def _fetch_user_preferences(spotify, user_id: int) -> str:
         else:
             logger.warning("No preference data could be extracted for user %s", user_id)
             return ""
-            
+
     except Exception as exc:
         logger.warning("Failed to fetch user preferences: %s", exc, exc_info=True)
         return ""
@@ -381,7 +382,7 @@ async def handle_mix_command(message: Message) -> None:
         status = await message.answer("Cooking up a playlist…")
 
         spotify = _get_spotify_client(message)
-        
+
         # Fetch user preferences to personalize the playlist
         logger.info("Fetching user preferences for personalization")
         try:

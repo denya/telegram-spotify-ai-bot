@@ -503,10 +503,10 @@ class SpotifyClient:
     ) -> list[dict[str, Any]]:
         """
         Get user's top artists.
-        
+
         Args:
             user_id: Telegram user ID
-            time_range: Time range for top artists - "short_term" (4 weeks), 
+            time_range: Time range for top artists - "short_term" (4 weeks),
                        "medium_term" (6 months), or "long_term" (several years)
             limit: Number of artists to return (max 50)
         """
@@ -531,7 +531,7 @@ class SpotifyClient:
     ) -> list[dict[str, Any]]:
         """
         Get user's top tracks.
-        
+
         Args:
             user_id: Telegram user ID
             time_range: Time range for top tracks - "short_term" (4 weeks),
@@ -558,7 +558,7 @@ class SpotifyClient:
     ) -> list[dict[str, Any]]:
         """
         Get user's recently played tracks.
-        
+
         Args:
             user_id: Telegram user ID
             limit: Number of recently played items to return (max 50)
