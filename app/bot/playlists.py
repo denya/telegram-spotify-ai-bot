@@ -130,7 +130,7 @@ async def _fetch_user_preferences(spotify: SpotifyClient, user_id: int) -> str:
         return ""
 
 
-async def _playlist_name(context: str, api_key: str | None) -> str:
+async def _playlist_name(context: str, api_key: str | None, model: str) -> str:
     """Generate a short, nice playlist name using Claude AI."""
     if not api_key:
         # Fallback to simple name if no API key
@@ -148,7 +148,7 @@ async def _playlist_name(context: str, api_key: str | None) -> str:
         )
 
         response = await client.messages.create(
-            model="claude-3-5-haiku-20241022",
+            model=model,
             max_tokens=50,
             temperature=0.7,
             messages=[{"role": "user", "content": prompt}],
@@ -442,7 +442,10 @@ async def handle_mix_command(message: Message) -> None:
             logger.warning("Failed to fetch user preferences, continuing without: %s", exc)
             user_preferences = ""
 
-        planner = ClaudePlaylistPlanner(api_key=settings.anthropic_api_key)
+        planner = ClaudePlaylistPlanner(
+            api_key=settings.anthropic_api_key,
+            model=settings.anthropic_model,
+        )
         try:
             plan = await planner.plan(context=context, user_preferences=user_preferences)
             logger.info("Successfully generated playlist plan with %d tracks", len(plan.tracks))
@@ -475,7 +478,11 @@ async def handle_mix_command(message: Message) -> None:
             await status.edit_text("Couldn't match any of the suggested songs on Spotify.")
             return
 
-        playlist_name = await _playlist_name(context, settings.anthropic_api_key)
+        playlist_name = await _playlist_name(
+            context,
+            settings.anthropic_api_key,
+            settings.anthropic_model,
+        )
         playlist_description = _playlist_description(context)
 
         logger.info("Creating Spotify playlist: %s", playlist_name)

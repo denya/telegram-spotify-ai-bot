@@ -15,7 +15,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from fastapi import FastAPI
 
-from .bot import commands, playback, playlists
+from .bot import commands, playback, playlists, search
 from .config import Settings, load_settings
 from .db import schema
 from .logging import setup_logging
@@ -54,6 +54,7 @@ def _configure_bot(
     dp.include_router(commands.router)
     dp.include_router(playback.router)
     dp.include_router(playlists.router)
+    dp.include_router(search.router)
     return bot, dp, spotify_client, token_store
 
 
@@ -66,8 +67,15 @@ async def _start_bot_polling(
     async def _stop_signal() -> bool:
         if stop_event is None:
             return False
-        await stop_event.wait()
-        return True
+        # Check if event is set without waiting
+        if stop_event.is_set():
+            return True
+        # Use a very short timeout to check periodically
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=0.1)
+            return True
+        except TimeoutError:
+            return False
 
     await dispatcher.start_polling(bot, handle_signals=False, stop_signal=_stop_signal)
 
@@ -115,14 +123,7 @@ async def run_combined(
 
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
-
-    def _trigger_stop() -> None:
-        logger.info("Shutdown signal received; stopping services")
-        stop_event.set()
-
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        with suppress(NotImplementedError):
-            loop.add_signal_handler(sig, _trigger_stop)
+    shutdown_initiated = False
 
     config = uvicorn.Config(
         "app.main:app",
@@ -144,14 +145,74 @@ async def run_combined(
     web_task = asyncio.create_task(_run_web(), name="uvicorn-server")
     tasks = {bot_task, web_task}
 
-    try:
-        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
-        for task in done:
-            task.result()
-    finally:
+    def _trigger_stop() -> None:
+        nonlocal shutdown_initiated
+        if shutdown_initiated:
+            return  # Prevent multiple calls
+        shutdown_initiated = True
+        logger.info("Shutdown signal received; stopping services")
         stop_event.set()
         server.should_exit = True
-        await asyncio.gather(*tasks, return_exceptions=True)
+        # Cancel tasks asynchronously
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        with suppress(NotImplementedError):
+            loop.add_signal_handler(sig, _trigger_stop)
+
+    try:
+        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        for task in done:
+            try:
+                task.result()
+            except asyncio.CancelledError:
+                logger.debug("Task %s was cancelled", task.get_name())
+            except Exception as e:
+                logger.error("Task %s raised exception: %s", task.get_name(), e, exc_info=True)
+    except Exception as e:
+        logger.error("Error in combined mode: %s", e, exc_info=True)
+    finally:
+        logger.info("Shutting down services...")
+        stop_event.set()
+        server.should_exit = True
+
+        # Temporarily suppress uvicorn/starlette error logging during shutdown
+        uvicorn_logger = logging.getLogger("uvicorn.error")
+        starlette_logger = logging.getLogger("starlette")
+        original_level = uvicorn_logger.level
+        starlette_original_level = starlette_logger.level
+
+        try:
+            uvicorn_logger.setLevel(logging.CRITICAL)
+            starlette_logger.setLevel(logging.CRITICAL)
+
+            # Give services a moment to shut down gracefully
+            await asyncio.sleep(0.1)
+
+            # Wait for tasks to complete naturally first (with a short timeout)
+            try:
+                await asyncio.wait_for(asyncio.gather(*tasks, return_exceptions=True), timeout=1.0)
+            except TimeoutError:
+                # If tasks don't complete naturally, cancel them
+                for task in tasks:
+                    if not task.done():
+                        task.cancel()
+
+                # Wait for cancelled tasks with timeout
+                try:
+                    await asyncio.wait_for(
+                        asyncio.gather(*tasks, return_exceptions=True), timeout=4.0
+                    )
+                except TimeoutError:
+                    logger.warning("Tasks did not complete within timeout, forcing shutdown")
+                    await asyncio.gather(*tasks, return_exceptions=True)
+        finally:
+            # Restore original log levels
+            uvicorn_logger.setLevel(original_level)
+            starlette_logger.setLevel(starlette_original_level)
+
         for sig in (signal.SIGINT, signal.SIGTERM):
             with suppress(NotImplementedError):
                 loop.remove_signal_handler(sig)

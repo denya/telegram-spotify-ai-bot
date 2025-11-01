@@ -16,6 +16,7 @@ DEFAULT_TELEGRAM_MODE: Final[TelegramMode] = "polling"
 DEFAULT_SPOTIFY_PKCE_ENABLED: Final[bool] = True
 DEFAULT_ANTHROPIC_WEB_SEARCH_ENABLED: Final[bool] = True
 DEFAULT_ANTHROPIC_WEB_SEARCH_MAX_USES: Final[int] = 3
+DEFAULT_ANTHROPIC_MODEL: Final[str] = "claude-sonnet-4-5"
 
 SPOTIFY_SCOPES: Final[tuple[str, ...]] = (
     "user-read-playback-state",
@@ -96,6 +97,7 @@ class Settings:
     spotify_pkce_enabled: bool
 
     anthropic_api_key: str | None
+    anthropic_model: str
     anthropic_web_search_enabled: bool
     anthropic_web_search_max_uses: int
 
@@ -118,6 +120,10 @@ class Settings:
             spotify_redirect_uri=spotify_redirect_uri,
             spotify_pkce_enabled=_bool("SPOTIFY_PKCE_ENABLED", DEFAULT_SPOTIFY_PKCE_ENABLED),
             anthropic_api_key=(getenv("ANTHROPIC_API_KEY") or None),
+            anthropic_model=(
+                getenv("ANTHROPIC_MODEL", DEFAULT_ANTHROPIC_MODEL).strip()
+                or DEFAULT_ANTHROPIC_MODEL
+            ),
             anthropic_web_search_enabled=_bool(
                 "ANTHROPIC_WEB_SEARCH_ENABLED", DEFAULT_ANTHROPIC_WEB_SEARCH_ENABLED
             ),

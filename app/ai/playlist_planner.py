@@ -7,11 +7,11 @@ from dataclasses import dataclass
 
 from anthropic import AsyncAnthropic
 
+from ..config import load_settings
 from .claude_client import ClaudeConfigurationError, get_client
 
 logger = logging.getLogger(__name__)
 
-MODEL_NAME = "claude-3-5-haiku-20241022"
 MAX_TRACKS = 25
 MAX_OUTPUT_TOKENS = 2048
 TEMPERATURE = 0.7
@@ -138,16 +138,30 @@ def _parse_tracks(raw: str) -> PlaylistPlan:
     return PlaylistPlan(tracks=planned)
 
 
+def _resolve_model(model: str | None) -> str:
+    resolved = (model or load_settings().anthropic_model).strip()
+    if not resolved:
+        raise ClaudeConfigurationError("Anthropic model must be configured.")
+    return resolved
+
+
 class ClaudePlaylistPlanner:
     """High-level helper to request playlist ideas from Anthropic Claude."""
 
-    def __init__(self, client: AsyncAnthropic | None = None, *, api_key: str | None = None) -> None:
+    def __init__(
+        self,
+        client: AsyncAnthropic | None = None,
+        *,
+        api_key: str | None = None,
+        model: str | None = None,
+    ) -> None:
         if client is None:
             self._client = get_client(api_key)
         else:
             if api_key is not None:
                 raise ClaudeConfigurationError("Provide either a client or an API key, not both.")
             self._client = client
+        self._model = _resolve_model(model)
 
     async def plan(self, *, context: str, user_preferences: str | None = None) -> PlaylistPlan:
         if not context.strip():
@@ -156,7 +170,7 @@ class ClaudePlaylistPlanner:
         logger.info("Requesting playlist from Claude with context: %s", context[:100])
         logger.debug(
             "Using model: %s, temperature: %s, max_tokens: %s",
-            MODEL_NAME,
+            self._model,
             TEMPERATURE,
             MAX_OUTPUT_TOKENS,
         )
@@ -176,7 +190,7 @@ class ClaudePlaylistPlanner:
                 context=context.strip(), user_preferences=prefs_section
             )
             response = await self._client.messages.create(
-                model=MODEL_NAME,
+                model=self._model,
                 max_tokens=MAX_OUTPUT_TOKENS,
                 temperature=TEMPERATURE,
                 system=SYSTEM_PROMPT,
