@@ -128,9 +128,11 @@ def _parse_tracks(raw: str) -> PlaylistPlan:
     if not planned:
         raise PlaylistPlannerError("Could not parse any tracks from Claude response")
 
-    if len(planned) < MAX_TRACKS:
+    # Accept any reasonable number of tracks (at least half of requested)
+    min_acceptable = MAX_TRACKS // 2
+    if len(planned) < min_acceptable:
         raise PlaylistPlannerError(
-            f"Claude returned fewer tracks than requested: {len(planned)} < {MAX_TRACKS}"
+            f"Claude returned too few tracks: {len(planned)}. Expected at least {min_acceptable}"
         )
 
     return PlaylistPlan(tracks=planned)

@@ -448,7 +448,7 @@ async def handle_mix_command(message: Message) -> None:
             logger.info("Successfully generated playlist plan with %d tracks", len(plan.tracks))
         except PlaylistPlannerError as exc:
             logger.error("Playlist planning failed for user %s: %s", user_id, exc, exc_info=True)
-            await status.edit_text(f"Claude couldn't build a playlist: {exc}")
+            await status.edit_text(f"Claude couldn't build a playlist: {exc!s}")
             return
 
         logger.info("Starting parallel Spotify search for %d tracks", len(plan.tracks))
@@ -463,7 +463,7 @@ async def handle_mix_command(message: Message) -> None:
             )
         except SpotifyClientError as exc:
             logger.error("Parallel search failed: %s", exc)
-            await status.edit_text(f"Spotify search failed: {exc}")
+            await status.edit_text(f"Spotify search failed: {exc!s}")
             return
 
         logger.info(
@@ -489,7 +489,7 @@ async def handle_mix_command(message: Message) -> None:
             logger.info("Playlist created successfully")
         except SpotifyClientError as exc:
             logger.error("Failed to create playlist: %s", exc)
-            await status.edit_text(f"Failed to create playlist: {exc}")
+            await status.edit_text(f"Failed to create playlist: {exc!s}")
             return
 
         playlist_id = playlist.get("id") if isinstance(playlist, dict) else None
@@ -514,7 +514,7 @@ async def handle_mix_command(message: Message) -> None:
             logger.info("Successfully added tracks to playlist")
         except SpotifyClientError as exc:
             logger.error("Failed to add tracks to playlist: %s", exc)
-            await status.edit_text(f"Unable to add tracks: {exc}")
+            await status.edit_text(f"Unable to add tracks: {exc!s}")
             return
 
         summary = _summarize_tracks([track for track, _ in found_tracks])

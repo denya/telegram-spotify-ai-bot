@@ -22,10 +22,19 @@ def test_parse_tracks_success() -> None:
 
 
 def test_parse_tracks_rejects_short_responses() -> None:
-    raw = _build_payload(count=MAX_TRACKS - 1)
+    raw = _build_payload(count=MAX_TRACKS // 2 - 1)
 
     with pytest.raises(PlaylistPlannerError):
         _parse_tracks(raw)
+
+
+def test_parse_tracks_accepts_minimum_tracks() -> None:
+    """Test that minimum acceptable number of tracks is accepted."""
+    raw = _build_payload(count=MAX_TRACKS // 2)
+    plan = _parse_tracks(raw)
+
+    assert len(plan.tracks) == MAX_TRACKS // 2
+    assert plan.tracks[0] == PlannedTrack(title="Song 0", artist="Artist 0")
 
 
 def test_parse_tracks_rejects_invalid_format() -> None:
