@@ -13,6 +13,7 @@ from contextlib import suppress
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import BotCommand
 from fastapi import FastAPI
 
 from .bot import commands, playback, playlists, search
@@ -58,6 +59,22 @@ def _configure_bot(
     return bot, dp, spotify_client, token_store
 
 
+async def _set_bot_commands(bot: Bot) -> None:
+    """Set bot commands for command suggestions in Telegram."""
+    bot_commands = [
+        BotCommand(command="start", description="Start the bot and connect Spotify"),
+        BotCommand(command="help", description="Show available commands and help"),
+        BotCommand(command="now", description="Show current track and playback controls"),
+        BotCommand(command="mix", description="Generate an AI-powered playlist"),
+        BotCommand(command="search", description="Find songs from vibes, lyrics, or memories"),
+    ]
+    try:
+        await bot.set_my_commands(bot_commands)
+        logger.info("Bot commands registered successfully")
+    except Exception as exc:
+        logger.warning("Failed to set bot commands: %s", exc, exc_info=True)
+
+
 async def _start_bot_polling(
     dispatcher: Dispatcher,
     bot: Bot,
@@ -95,6 +112,7 @@ async def run_bot() -> None:
     bot, dispatcher, spotify_client, _ = _configure_bot(settings)
 
     try:
+        await _set_bot_commands(bot)
         logger.info("Bot is listening for updates…")
         await _start_bot_polling(dispatcher, bot)
     finally:
@@ -120,6 +138,8 @@ async def run_combined(
     logger.info("  Login URL: %s/spotify/login", settings.web_base_url)
     await schema.ensure_schema(settings.db_path)
     bot, dispatcher, spotify_client, _ = _configure_bot(settings)
+
+    await _set_bot_commands(bot)
 
     loop = asyncio.get_running_loop()
     stop_event = asyncio.Event()
