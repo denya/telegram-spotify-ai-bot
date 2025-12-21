@@ -12,12 +12,12 @@ from typing import Any
 
 import httpx
 
-logger = logging.getLogger(__name__)
-
 from ..config import Settings
 from ..db import repository
 from . import auth as spotify_auth
 from .auth import RevokedTokenError
+
+logger = logging.getLogger(__name__)
 
 
 class SpotifyClientError(RuntimeError):

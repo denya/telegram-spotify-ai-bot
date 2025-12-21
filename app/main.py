@@ -183,7 +183,7 @@ async def run_combined(
             loop.add_signal_handler(sig, _trigger_stop)
 
     try:
-        done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        done, _ = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         for task in done:
             try:
                 task.result()
