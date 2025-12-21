@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from aiogram import Router
+from aiogram import F, Router
 from aiogram.filters import Command
 from aiogram.types import Message
 from anthropic import AsyncAnthropic
@@ -362,8 +362,13 @@ async def _search_tracks_parallel(
     return found_tracks, missing_tracks
 
 
-@router.message(Command("mix"))
-async def handle_mix_command(message: Message) -> None:
+async def _create_mix(message: Message, context: str) -> None:
+    """Core mix creation logic. Creates a playlist based on the given context.
+
+    Args:
+        message: The Telegram message that triggered the mix creation.
+        context: The user's description of what kind of playlist they want.
+    """
     settings = _get_settings(message)
     tokens = await _load_tokens(message)
 
@@ -372,7 +377,7 @@ async def handle_mix_command(message: Message) -> None:
         return
 
     user_id = message.from_user.id
-    logger.info("User %s requested /mix command", user_id)
+    logger.info("User %s requested mix with context: %s", user_id, context)
 
     if tokens is None:
         logger.warning("User %s not authenticated with Spotify", user_id)
@@ -383,18 +388,6 @@ async def handle_mix_command(message: Message) -> None:
         logger.error("Anthropic API key not configured")
         await message.answer("Anthropic API key is not configured on the server.")
         return
-
-    if message.text is None:
-        await message.answer("Provide some context, e.g. /mix dreamy evening coding")
-        return
-
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2 or not parts[1].strip():
-        await message.answer("Tell me what vibe you want, for example: /mix sunset rooftop vibes")
-        return
-
-    context = parts[1].strip()
-    logger.info("User %s requesting playlist with context: %s", user_id, context)
 
     now = datetime.now(tz=UTC)
     internal_user_id: int | None = None
@@ -614,4 +607,48 @@ async def handle_mix_command(message: Message) -> None:
                 logger.exception("Failed to clear mix processing lock for user %s", user_id)
 
 
-__all__ = ["handle_mix_command", "router"]
+@router.message(Command("mix"))
+async def handle_mix_command(message: Message) -> None:
+    """Handle the /mix command to create a playlist based on user's vibe description."""
+    if message.text is None:
+        await message.answer("Provide some context, e.g. /mix dreamy evening coding")
+        return
+
+    parts = message.text.split(maxsplit=1)
+    if len(parts) < 2 or not parts[1].strip():
+        await message.answer("Tell me what vibe you want, for example: /mix sunset rooftop vibes")
+        return
+
+    context = parts[1].strip()
+    await _create_mix(message, context)
+
+
+@router.message(F.forward_origin, F.text)
+async def handle_forwarded_message(message: Message) -> None:
+    """Handle forwarded text messages by treating their content as mix context.
+
+    When a user forwards a text message to the bot, the forwarded text
+    is used as the context for creating a playlist. Rate limiting prevents
+    spam when multiple messages are forwarded at once - only the first
+    will create a mix, subsequent ones will get a "still processing" message.
+    """
+    if message.text is None:
+        return
+
+    # Skip if the forwarded message is a command
+    if message.text.startswith("/"):
+        return
+
+    context = message.text.strip()
+    if not context:
+        await message.answer("The forwarded message is empty. Forward a message with some text!")
+        return
+
+    logger.info(
+        "User %s forwarded a message for mix creation",
+        message.from_user.id if message.from_user else "unknown",
+    )
+    await _create_mix(message, context)
+
+
+__all__ = ["handle_forwarded_message", "handle_mix_command", "router"]
