@@ -6,6 +6,7 @@ import logging
 from dataclasses import dataclass
 
 from anthropic import AsyncAnthropic
+from anthropic.types import WebSearchTool20250305Param
 
 from ..config import load_settings
 from .claude_client import ClaudeConfigurationError, get_client
@@ -17,7 +18,7 @@ MAX_OUTPUT_TOKENS = 4096  # Increased to accommodate web search results
 TEMPERATURE = 0.7
 
 # Web search tool definition for up-to-date music information
-WEB_SEARCH_TOOL = {
+WEB_SEARCH_TOOL: WebSearchTool20250305Param = {
     "type": "web_search_20250305",
     "name": "web_search",
     "max_uses": 3,  # Limit searches to control costs
@@ -219,16 +220,9 @@ class ClaudePlaylistPlanner:
         # Find the text block in the response (may have multiple blocks with web search)
         text: str = ""
         for block in response.content:
-            block_type = getattr(block, "type", None) or (
-                block.get("type") if isinstance(block, dict) else None
-            )
-            logger.debug("Processing response block: type=%s", block_type)
-
-            if block_type == "text":
-                if hasattr(block, "text"):
-                    text = block.text
-                elif isinstance(block, dict):
-                    text = str(block.get("text", ""))
+            logger.debug("Processing response block: type=%s", block.type)
+            if block.type == "text":
+                text = block.text
                 break  # Use the first text block
 
         if not text:
