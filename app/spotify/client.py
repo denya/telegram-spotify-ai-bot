@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -97,8 +98,12 @@ def _sanitize_text_for_spotify(text: str, max_length: int, fallback: str) -> str
     # Strip whitespace
     sanitized = text.strip()
 
-    # Remove null bytes and control characters (except newlines/tabs in descriptions)
-    sanitized = "".join(char for char in sanitized if ord(char) >= 32 or char in "\n\t")
+    # Remove null bytes and control characters
+    # Note: Spotify does NOT support newlines in playlist descriptions
+    # (see https://community.spotify.com/t5/Desktop-Windows/line-breaks-in-playlist/td-p/5084241)
+    # Replace newlines/tabs with spaces, then remove other control characters
+    sanitized = sanitized.replace("\n", " ").replace("\r", " ").replace("\t", " ")
+    sanitized = "".join(char for char in sanitized if ord(char) >= 32)
 
     # Remove characters that are problematic for Spotify
     # These can cause 400 errors even though they're valid Unicode
@@ -111,6 +116,9 @@ def _sanitize_text_for_spotify(text: str, max_length: int, fallback: str) -> str
     ]
     for char in problematic_chars:
         sanitized = sanitized.replace(char, "")
+
+    # Collapse multiple consecutive spaces into one
+    sanitized = re.sub(r" +", " ", sanitized)
 
     # Limit length, try to break at word boundary
     if len(sanitized) > max_length:
