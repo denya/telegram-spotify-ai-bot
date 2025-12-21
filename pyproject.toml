@@ -54,6 +54,30 @@ pretty = true
 ignore_missing_imports = true
 plugins = []
 
+# Disable untyped-decorator for modules using aiogram/fastapi decorators
+[[tool.mypy.overrides]]
+module = [
+    "app.bot.commands",
+    "app.bot.playback",
+    "app.bot.playlists",
+    "app.bot.search",
+    "app.web.health",
+    "app.web.auth_routes",
+    "tests.*",
+]
+disallow_untyped_decorators = false
+
+# Disable checks for aiogram CallbackData subclasses (uses metaclass magic)
+[[tool.mypy.overrides]]
+module = "app.bot.keyboards"
+disallow_untyped_decorators = false
+disable_error_code = ["misc", "call-arg"]
+
+# Bot extension attributes - different mypy versions handle this differently
+[[tool.mypy.overrides]]
+module = "app.main"
+warn_unused_ignores = false
+
 [tool.pytest.ini_options]
 minversion = "7.0"
 testpaths = ["tests"]
