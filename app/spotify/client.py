@@ -601,13 +601,16 @@ class SpotifyClient:
         }
 
         # Log at INFO level for debugging 400 errors
+        desc_preview = sanitized_description[:50]
+        if len(sanitized_description) > 50:
+            desc_preview += "..."
         logger.info(
             "Creating playlist for user %s: name=%r (original=%r), "
             "description=%r (len=%d, original_len=%d), public=%s",
             spotify_user_id,
             sanitized_name,
             name,
-            sanitized_description[:50] + "..." if len(sanitized_description) > 50 else sanitized_description,
+            desc_preview,
             len(sanitized_description),
             len(description) if description else 0,
             public,
@@ -622,7 +625,7 @@ class SpotifyClient:
                 expected_status=(201,),
             )
             return response.json()  # type: ignore[no-any-return]
-        except SpotifyClientError as exc:
+        except SpotifyClientError:
             # Log full payload details on failure for debugging
             logger.error(
                 "Playlist creation failed. Full payload: name=%r, description=%r, public=%s",
