@@ -112,6 +112,7 @@ def _parse_tracks(raw: str) -> PlaylistPlan:
         text = "\n".join(lines[1:-1])
 
     planned: list[PlannedTrack] = []
+    seen: set[tuple[str, str]] = set()
     for line_num, line in enumerate(text.split("\n"), start=1):
         line = line.strip()
         if not line:
@@ -130,6 +131,11 @@ def _parse_tracks(raw: str) -> PlaylistPlan:
         title = parts[1].strip()
 
         if artist and title:
+            key = (artist.lower(), title.lower())
+            if key in seen:
+                logger.debug("Skipping duplicate: %s - %s", artist, title)
+                continue
+            seen.add(key)
             planned.append(PlannedTrack(title=title, artist=artist))
             logger.debug("Parsed track %d: %s - %s", len(planned), artist, title)
         else:
