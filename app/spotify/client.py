@@ -98,10 +98,7 @@ def _sanitize_text_for_spotify(text: str, max_length: int, fallback: str) -> str
     sanitized = text.strip()
 
     # Remove null bytes and control characters (except newlines/tabs in descriptions)
-    sanitized = "".join(
-        char for char in sanitized
-        if ord(char) >= 32 or char in "\n\t"
-    )
+    sanitized = "".join(char for char in sanitized if ord(char) >= 32 or char in "\n\t")
 
     # Remove characters that are problematic for Spotify
     # These can cause 400 errors even though they're valid Unicode
