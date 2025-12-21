@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -79,31 +80,60 @@ def _default_http_client() -> httpx.AsyncClient:
     return httpx.AsyncClient(base_url="https://api.spotify.com/v1", timeout=timeout)
 
 
-def _sanitize_playlist_name(name: str) -> str:
+def _sanitize_text_for_spotify(text: str, max_length: int, fallback: str) -> str:
     """
-    Sanitize playlist name to avoid Spotify API 400 errors.
+    Sanitize text (name or description) for Spotify API to avoid 400 errors.
 
-    Spotify has undocumented restrictions on playlist names. This function:
-    - Limits length to 100 characters (Spotify's max is around 200)
+    Spotify has undocumented restrictions on text fields. This function:
+    - Limits length to specified max
     - Strips leading/trailing whitespace
-    - Replaces problematic characters that may cause encoding issues
-    - Ensures the name is not empty
+    - Removes/replaces problematic characters that may cause encoding issues
+    - Removes control characters and null bytes
+    - Ensures the text is not empty
     """
-    if not name:
-        return "My Playlist"
+    if not text:
+        return fallback
 
     # Strip whitespace
-    sanitized = name.strip()
+    sanitized = text.strip()
 
-    # Limit length (Spotify allows up to ~200 chars, but 100 is safer)
-    if len(sanitized) > 100:
-        sanitized = sanitized[:100].rsplit(" ", 1)[0] or sanitized[:100]
+    # Remove null bytes and control characters (except newlines/tabs in descriptions)
+    sanitized = "".join(
+        char for char in sanitized
+        if ord(char) >= 32 or char in "\n\t"
+    )
 
-    # Ensure name is not empty after processing
-    if not sanitized:
-        return "My Playlist"
+    # Remove characters that are problematic for Spotify
+    # These can cause 400 errors even though they're valid Unicode
+    problematic_chars = [
+        "\u200b",  # Zero-width space
+        "\u200c",  # Zero-width non-joiner
+        "\u200d",  # Zero-width joiner
+        "\ufeff",  # BOM
+        "\u00ad",  # Soft hyphen
+    ]
+    for char in problematic_chars:
+        sanitized = sanitized.replace(char, "")
 
-    return sanitized
+    # Limit length, try to break at word boundary
+    if len(sanitized) > max_length:
+        sanitized = sanitized[:max_length].rsplit(" ", 1)[0] or sanitized[:max_length]
+
+    # Ensure text is not empty after processing
+    if not sanitized.strip():
+        return fallback
+
+    return sanitized.strip()
+
+
+def _sanitize_playlist_name(name: str) -> str:
+    """Sanitize playlist name for Spotify API."""
+    return _sanitize_text_for_spotify(name, max_length=100, fallback="My Playlist")
+
+
+def _sanitize_playlist_description(description: str) -> str:
+    """Sanitize playlist description for Spotify API."""
+    return _sanitize_text_for_spotify(description, max_length=300, fallback="")
 
 
 class SpotifyClient:
@@ -226,6 +256,19 @@ class SpotifyClient:
                 response.status_code,
                 response.text[:1000] if response.text else "(empty)",
             )
+
+            # For 400 errors, log the request body to help debug
+            if response.status_code == 400:
+                request_body = kwargs.get("json")
+                if request_body:
+                    try:
+                        body_str = json.dumps(request_body, ensure_ascii=False)
+                        logger.error(
+                            "Request body that caused 400: %s",
+                            body_str[:2000] if len(body_str) > 2000 else body_str,
+                        )
+                    except Exception as json_err:
+                        logger.error("Could not serialize request body: %s", json_err)
 
             # Try to parse error message for better user-facing errors
             error_message = response.text
@@ -545,33 +588,58 @@ class SpotifyClient:
         if not isinstance(spotify_user_id, str):
             raise SpotifyClientError("Unable to determine Spotify user id")
 
-        # Sanitize playlist name: remove/replace problematic characters
+        # Sanitize playlist name and description
         # Spotify has undocumented restrictions on certain characters
         sanitized_name = _sanitize_playlist_name(name)
+        sanitized_description = _sanitize_playlist_description(description)
 
-        # Sanitize description as well
-        sanitized_description = description[:300] if description else ""
+        # Build the request payload
+        payload = {
+            "name": sanitized_name,
+            "description": sanitized_description,
+            "public": public,
+        }
 
-        logger.debug(
-            "Creating playlist: name=%r (sanitized=%r), description_len=%d, public=%s",
-            name,
+        # Log at INFO level for debugging 400 errors
+        logger.info(
+            "Creating playlist for user %s: name=%r (original=%r), "
+            "description=%r (len=%d, original_len=%d), public=%s",
+            spotify_user_id,
             sanitized_name,
+            name,
+            sanitized_description[:50] + "..." if len(sanitized_description) > 50 else sanitized_description,
             len(sanitized_description),
+            len(description) if description else 0,
             public,
         )
 
-        response = await self._request(
-            user_id,
-            "POST",
-            f"/users/{spotify_user_id}/playlists",
-            json={
-                "name": sanitized_name,
-                "description": sanitized_description,
-                "public": public,
-            },
-            expected_status=(201,),
-        )
-        return response.json()  # type: ignore[no-any-return]
+        try:
+            response = await self._request(
+                user_id,
+                "POST",
+                f"/users/{spotify_user_id}/playlists",
+                json=payload,
+                expected_status=(201,),
+            )
+            return response.json()  # type: ignore[no-any-return]
+        except SpotifyClientError as exc:
+            # Log full payload details on failure for debugging
+            logger.error(
+                "Playlist creation failed. Full payload: name=%r, description=%r, public=%s",
+                sanitized_name,
+                sanitized_description,
+                public,
+            )
+            # Log character codes of the name and description for debugging encoding issues
+            logger.error(
+                "Name char codes: %s",
+                [ord(c) for c in sanitized_name],
+            )
+            logger.error(
+                "Description char codes (first 100): %s",
+                [ord(c) for c in sanitized_description[:100]],
+            )
+            raise
 
     async def add_tracks(
         self,
