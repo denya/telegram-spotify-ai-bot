@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -27,11 +28,29 @@ logger = logging.getLogger(__name__)
 router = Router(name="playlists")
 
 
-async def _fetch_user_preferences(spotify: SpotifyClient, user_id: int) -> str:
+@dataclass
+class UserPreferencesResult:
+    """Result of fetching user preferences."""
+
+    preferences: str
+    needs_reauth: bool = False
+
+
+def _is_scope_error(exc: BaseException) -> bool:
+    """Check if an exception is a Spotify scope/permission error."""
+    if isinstance(exc, SpotifyClientError):
+        msg = str(exc).lower()
+        return "insufficient client scope" in msg or "403" in msg
+    return False
+
+
+async def _fetch_user_preferences(
+    spotify: SpotifyClient, user_id: int
+) -> UserPreferencesResult:
     """Fetch and format user's Spotify preferences for the AI prompt."""
     logger.info("Fetching user preferences for user %s", user_id)
 
-    preferences_parts = []
+    preferences_parts: list[str] = []
 
     try:
         # Fetch multiple time ranges in parallel for a comprehensive view
@@ -46,6 +65,17 @@ async def _fetch_user_preferences(spotify: SpotifyClient, user_id: int) -> str:
         top_artists_long: list[dict[str, Any]] | BaseException = results[1]
         top_tracks_recent: list[dict[str, Any]] | BaseException = results[2]
         recently_played: list[dict[str, Any]] | BaseException = results[3]
+
+        # Check if all calls failed due to scope errors
+        all_results = [top_artists_medium, top_artists_long, top_tracks_recent, recently_played]
+        scope_errors = [
+            r for r in all_results if isinstance(r, BaseException) and _is_scope_error(r)
+        ]
+        if len(scope_errors) == len(all_results):
+            logger.warning(
+                "All preference API calls failed with scope errors for user %s", user_id
+            )
+            return UserPreferencesResult(preferences="", needs_reauth=True)
 
         # Process top artists (medium term - last 6 months)
         if not isinstance(top_artists_medium, BaseException) and top_artists_medium:
@@ -120,14 +150,14 @@ async def _fetch_user_preferences(spotify: SpotifyClient, user_id: int) -> str:
         if preferences_parts:
             result = "\n".join(preferences_parts)
             logger.info("Successfully built user preferences context (%d chars)", len(result))
-            return result
+            return UserPreferencesResult(preferences=result)
         else:
             logger.warning("No preference data could be extracted for user %s", user_id)
-            return ""
+            return UserPreferencesResult(preferences="")
 
     except Exception as exc:
         logger.warning("Failed to fetch user preferences: %s", exc, exc_info=True)
-        return ""
+        return UserPreferencesResult(preferences="")
 
 
 async def _playlist_name(context: str, api_key: str | None, model: str) -> str:
@@ -159,8 +189,8 @@ async def _playlist_name(context: str, api_key: str | None, model: str) -> str:
             text: str
             if hasattr(first_block, "text"):
                 text = first_block.text
-            elif isinstance(first_block, dict):  # type: ignore[unreachable]
-                text = str(first_block.get("text", ""))  # type: ignore[unreachable]
+            elif isinstance(first_block, dict):
+                text = str(first_block.get("text", ""))
             else:
                 text = str(first_block)
 
@@ -431,8 +461,22 @@ async def handle_mix_command(message: Message) -> None:
         # Fetch user preferences to personalize the playlist
         logger.info("Fetching user preferences for personalization")
         try:
-            user_preferences = await _fetch_user_preferences(spotify, user_id)
-            if user_preferences:
+            prefs_result = await _fetch_user_preferences(spotify, user_id)
+            user_preferences = prefs_result.preferences
+            if prefs_result.needs_reauth:
+                # User's token doesn't have required scopes - offer re-authorization
+                logger.info("User %s needs to re-authorize for preference scopes", user_id)
+                await status.edit_text(
+                    "🔄 <b>Spotify permissions update needed</b>\n\n"
+                    "We've added new features that require additional Spotify permissions "
+                    "to personalize your playlists based on your listening history.\n\n"
+                    "Please use /start to reconnect your Spotify account.\n\n"
+                    "<i>I'll create your playlist without personalization for now.</i>",
+                    parse_mode="HTML",
+                )
+                # Continue with empty preferences
+                user_preferences = ""
+            elif user_preferences:
                 logger.info(
                     "User preferences fetched successfully, %d chars", len(user_preferences)
                 )
@@ -441,6 +485,12 @@ async def handle_mix_command(message: Message) -> None:
         except Exception as exc:
             logger.warning("Failed to fetch user preferences, continuing without: %s", exc)
             user_preferences = ""
+
+        # Update status to show we're generating the playlist
+        try:
+            await status.edit_text("🎵 Generating playlist...")
+        except Exception as status_exc:
+            logger.debug("Could not update status message: %s", status_exc)
 
         planner = ClaudePlaylistPlanner(
             api_key=settings.anthropic_api_key,

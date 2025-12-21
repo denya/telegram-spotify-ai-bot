@@ -24,6 +24,8 @@ SPOTIFY_SCOPES: Final[tuple[str, ...]] = (
     "user-read-currently-playing",
     "playlist-modify-private",
     "playlist-modify-public",
+    "user-top-read",
+    "user-read-recently-played",
 )
 
 

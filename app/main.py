@@ -47,9 +47,9 @@ def _configure_bot(
         token=settings.telegram_bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
-    bot.settings = settings  # type: ignore[attr-defined]
-    bot.token_store = token_store  # type: ignore[attr-defined]
-    bot.spotify_client = spotify_client  # type: ignore[attr-defined]
+    bot.settings = settings
+    bot.token_store = token_store
+    bot.spotify_client = spotify_client
 
     dp = Dispatcher()
     dp.include_router(commands.router)

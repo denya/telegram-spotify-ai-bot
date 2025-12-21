@@ -42,8 +42,12 @@ Core Principles:
    coherence
 6. For requests about recent/new music, use web search to find current releases and trends
 
-Always respond with ONLY a simple list of songs in 'artist - song' format, one per line.
-No explanations, no numbering, no markdown."""
+CRITICAL OUTPUT REQUIREMENTS:
+- You MUST ALWAYS end your response with a complete list of songs
+- NEVER respond with only explanations, reasoning, or statements about needing more information
+- Even if you cannot find all requested information, provide the best playlist you can
+- Your FINAL output MUST be a simple list of songs in 'artist - song' format, one per line
+- No explanations, no numbering, no markdown - ONLY the song list"""
 
 USER_PROMPT_TEMPLATE = """Create a playlist of exactly 25 songs based on the following information.
 
@@ -218,12 +222,13 @@ class ClaudePlaylistPlanner:
             raise PlaylistPlannerError("Claude returned an empty response")
 
         # Find the text block in the response (may have multiple blocks with web search)
+        # When web search is used, Claude may output reasoning/thinking in earlier blocks
+        # and the actual song list in later blocks, so we take the LAST text block
         text: str = ""
         for block in response.content:
             logger.debug("Processing response block: type=%s", block.type)
             if block.type == "text":
-                text = block.text
-                break  # Use the first text block
+                text = block.text  # Keep overwriting to get the last text block
 
         if not text:
             logger.error("No text block found in response, blocks: %s", response.content)
