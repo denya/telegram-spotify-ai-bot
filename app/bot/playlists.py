@@ -44,9 +44,7 @@ def _is_scope_error(exc: BaseException) -> bool:
     return False
 
 
-async def _fetch_user_preferences(
-    spotify: SpotifyClient, user_id: int
-) -> UserPreferencesResult:
+async def _fetch_user_preferences(spotify: SpotifyClient, user_id: int) -> UserPreferencesResult:
     """Fetch and format user's Spotify preferences for the AI prompt."""
     logger.info("Fetching user preferences for user %s", user_id)
 
@@ -72,9 +70,7 @@ async def _fetch_user_preferences(
             r for r in all_results if isinstance(r, BaseException) and _is_scope_error(r)
         ]
         if len(scope_errors) == len(all_results):
-            logger.warning(
-                "All preference API calls failed with scope errors for user %s", user_id
-            )
+            logger.warning("All preference API calls failed with scope errors for user %s", user_id)
             return UserPreferencesResult(preferences="", needs_reauth=True)
 
         # Process top artists (medium term - last 6 months)
