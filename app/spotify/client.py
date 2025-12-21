@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime
@@ -15,6 +16,8 @@ from ..config import Settings
 from ..db import repository
 from . import auth as spotify_auth
 from .auth import RevokedTokenError
+
+logger = logging.getLogger(__name__)
 
 
 class SpotifyClientError(RuntimeError):
@@ -74,6 +77,33 @@ class RepositoryTokenStore:
 def _default_http_client() -> httpx.AsyncClient:
     timeout = httpx.Timeout(10.0, read=10.0)
     return httpx.AsyncClient(base_url="https://api.spotify.com/v1", timeout=timeout)
+
+
+def _sanitize_playlist_name(name: str) -> str:
+    """
+    Sanitize playlist name to avoid Spotify API 400 errors.
+
+    Spotify has undocumented restrictions on playlist names. This function:
+    - Limits length to 100 characters (Spotify's max is around 200)
+    - Strips leading/trailing whitespace
+    - Replaces problematic characters that may cause encoding issues
+    - Ensures the name is not empty
+    """
+    if not name:
+        return "My Playlist"
+
+    # Strip whitespace
+    sanitized = name.strip()
+
+    # Limit length (Spotify allows up to ~200 chars, but 100 is safer)
+    if len(sanitized) > 100:
+        sanitized = sanitized[:100].rsplit(" ", 1)[0] or sanitized[:100]
+
+    # Ensure name is not empty after processing
+    if not sanitized:
+        return "My Playlist"
+
+    return sanitized
 
 
 class SpotifyClient:
@@ -188,6 +218,15 @@ class SpotifyClient:
         # Treat any 2xx as success. Some Spotify endpoints may return 200
         # even when docs claim 204, so be permissive here.
         if not (200 <= response.status_code < 300):
+            # Log full response for debugging
+            logger.error(
+                "Spotify API error: %s %s -> %d, body: %s",
+                method,
+                path,
+                response.status_code,
+                response.text[:1000] if response.text else "(empty)",
+            )
+
             # Try to parse error message for better user-facing errors
             error_message = response.text
             try:
@@ -197,6 +236,7 @@ class SpotifyClient:
                     if isinstance(error_obj, dict):
                         status_code = error_obj.get("status")
                         message = error_obj.get("message", "")
+                        reason = error_obj.get("reason", "")
                         if message:
                             if status_code == 403 and "Restricted device" in message:
                                 error_message = (
@@ -206,7 +246,15 @@ class SpotifyClient:
                                 )
                             elif status_code == 403:
                                 error_message = f"Access forbidden: {message}"
-                            elif message:
+                            elif status_code == 400:
+                                # Log additional details for bad request errors
+                                logger.error(
+                                    "Bad request details - message: %s, reason: %s",
+                                    message,
+                                    reason,
+                                )
+                                error_message = f"Bad request: {message}"
+                            else:
                                 error_message = message
             except (ValueError, TypeError, AttributeError):
                 # Failed to parse JSON, use raw text
@@ -496,11 +544,31 @@ class SpotifyClient:
         spotify_user_id = profile.get("id")
         if not isinstance(spotify_user_id, str):
             raise SpotifyClientError("Unable to determine Spotify user id")
+
+        # Sanitize playlist name: remove/replace problematic characters
+        # Spotify has undocumented restrictions on certain characters
+        sanitized_name = _sanitize_playlist_name(name)
+
+        # Sanitize description as well
+        sanitized_description = description[:300] if description else ""
+
+        logger.debug(
+            "Creating playlist: name=%r (sanitized=%r), description_len=%d, public=%s",
+            name,
+            sanitized_name,
+            len(sanitized_description),
+            public,
+        )
+
         response = await self._request(
             user_id,
             "POST",
             f"/users/{spotify_user_id}/playlists",
-            json={"name": name, "description": description, "public": public},
+            json={
+                "name": sanitized_name,
+                "description": sanitized_description,
+                "public": public,
+            },
             expected_status=(201,),
         )
         return response.json()  # type: ignore[no-any-return]
