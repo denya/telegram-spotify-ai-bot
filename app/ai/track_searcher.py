@@ -179,8 +179,6 @@ class ClaudeTrackSearcher:
         # Extract text from TextBlock object properly
         if hasattr(first_block, "text"):
             text = first_block.text
-        elif isinstance(first_block, dict):
-            text = str(first_block.get("text", ""))
         else:
             text = str(first_block)
 

@@ -185,8 +185,6 @@ async def _playlist_name(context: str, api_key: str | None, model: str) -> str:
             text: str
             if hasattr(first_block, "text"):
                 text = first_block.text
-            elif isinstance(first_block, dict):
-                text = str(first_block.get("text", ""))
             else:
                 text = str(first_block)
 
